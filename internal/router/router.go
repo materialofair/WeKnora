@@ -163,7 +163,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 	}
 
 	// 前端静态文件（仅 Lite 版本内嵌前端）
-	if handler.Edition == "lite" {
+	if handler.Edition == "lite" || os.Getenv("WEKNORA_PORTABLE") == "true" {
 		serveFrontendStatic(r)
 	}
 

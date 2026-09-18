@@ -6,7 +6,7 @@
 #     a standalone Go binary with a small, well-scoped dependency surface
 #     where staying current is cheap.
 #   * Every other ecosystem (server gomod, /client, frontend npm,
-#     miniprogram npm, docreader pip, github-actions) is configured as
+#     docreader pip, github-actions) is configured as
 #     "security-only" — no scheduled version PRs, but CVE security
 #     updates still open PRs automatically.
 #
@@ -99,19 +99,6 @@ updates:
         update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
     groups:
       frontend-security:
-        applies-to: security-updates
-        patterns: ["*"]
-
-  - package-ecosystem: npm
-    directory: "/miniprogram"
-    schedule:
-      interval: monthly
-    open-pull-requests-limit: 0
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
-    groups:
-      miniprogram-security:
         applies-to: security-updates
         patterns: ["*"]
 

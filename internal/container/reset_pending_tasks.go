@@ -30,6 +30,10 @@ const restartInterruptedMessage = "Task interrupted due to application restart"
 // hook never resets knowledge/summary rows in distributed mode; it only keeps
 // the separate sync-log cleanup below.
 func resetPendingTasks(db *gorm.DB) {
+	// Portable tasks survive restart and are reclaimed after handlers register.
+	if os.Getenv("WEKNORA_PORTABLE") == "true" {
+		return
+	}
 	distributed := os.Getenv("REDIS_ADDR") != ""
 	ctx := context.Background()
 	spanRepo := repository.NewKnowledgeSpanRepository(db)

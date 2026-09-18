@@ -11,7 +11,7 @@ package anydoc
 #cgo CFLAGS: -I${SRCDIR}/include
 #cgo darwin,arm64 LDFLAGS: -L${SRCDIR}/lib/darwin_arm64 -lanydoc_go -lm -lstdc++
 #cgo darwin,amd64 LDFLAGS: -L${SRCDIR}/lib/darwin_amd64 -lanydoc_go -lm -lstdc++
-#cgo windows,amd64 LDFLAGS: -L${SRCDIR}/lib/windows_amd64 -lanydoc_go
+#cgo windows,amd64 LDFLAGS: -L${SRCDIR}/lib/windows_amd64 -lanydoc_go -lws2_32 -luserenv -lbcrypt -lntdll -lstdc++
 
 #include <stdint.h>
 #include <stdlib.h>

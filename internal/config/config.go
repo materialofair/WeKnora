@@ -499,6 +499,9 @@ func ConfigDir() string {
 
 // LoadConfig 从配置文件加载配置
 func LoadConfig() (*Config, error) {
+	if path := os.Getenv("WEKNORA_CONFIG_FILE"); path != "" {
+		viper.SetConfigFile(path)
+	}
 	// 设置配置文件名和路径
 	viper.SetConfigName("config")         // 配置文件名称(不带扩展名)
 	viper.SetConfigType("yaml")           // 配置文件类型

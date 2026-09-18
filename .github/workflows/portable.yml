@@ -1,0 +1,67 @@
+name: Portable and Electron packages
+on:
+  workflow_dispatch:
+  push:
+    branches: [portable]
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, ubuntu-22.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Windows GNU toolchain
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          path-type: inherit
+          install: mingw-w64-x86_64-toolchain
+      - name: Install dependencies
+        shell: bash
+        run: |
+          npm ci --prefix frontend
+          npm ci --prefix desktop
+      - name: Build Unix bundle
+        if: runner.os != 'Windows'
+        run: node scripts/package-portable.mjs
+      - name: Build Windows bundle
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        env:
+          TARGET: x86_64-pc-windows-gnu
+          CC: gcc
+          CXX: g++
+        run: |
+          rustup target add x86_64-pc-windows-gnu
+          node scripts/package-portable.mjs
+      - name: Verify native runtime
+        shell: bash
+        run: |
+          node scripts/smoke-portable.cjs
+          node scripts/smoke-ingestion.cjs
+          npm test --prefix desktop
+      - name: Package Electron
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run dist --prefix desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: knowledge-assistant-${{ matrix.os }}
+          path: |
+            dist/portable/
+            dist/electron/*.dmg
+            dist/electron/*.zip
+            dist/electron/*.exe
+            dist/electron/*.AppImage
+          if-no-files-found: error

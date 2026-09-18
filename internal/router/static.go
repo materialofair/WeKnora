@@ -37,8 +37,7 @@ func serveFrontendStatic(r *gin.Engine) {
 			return
 		}
 		path := c.Request.URL.Path
-		if strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/health") || strings.HasPrefix(path, "/swagger/") ||
-			strings.HasPrefix(path, "/r/") || path == "/files" {
+		if isBackendPath(path) {
 			c.Next()
 			return
 		}
@@ -73,4 +72,15 @@ func setFrontendCacheHeaders(w http.ResponseWriter, path string) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+}
+
+// Backend namespaces must never fall through to the SPA, including unknown
+// routes: API clients require real errors rather than HTML with status 200.
+func isBackendPath(path string) bool {
+	for _, prefix := range []string{"/api", "/health", "/swagger", "/r", "/files", "/mcp", "/im", "/.well-known", "/oauth"} {
+		if path == prefix || strings.HasPrefix(path, prefix+"/") {
+			return true
+		}
+	}
+	return false
 }

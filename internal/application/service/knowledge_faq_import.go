@@ -2269,8 +2269,8 @@ func (s *knowledgeService) ProcessFAQImport(ctx context.Context, t *asynq.Task) 
 	}
 
 	// 获取任务重试信息，用于判断是否是最后一次重试
-	retryCount, _ := asynq.GetRetryCount(ctx)
-	maxRetry, _ := asynq.GetMaxRetry(ctx)
+	retryCount, _ := backgroundTaskRetryCount(ctx)
+	maxRetry, _ := backgroundTaskMaxRetry(ctx)
 	isLastRetry := retryCount >= maxRetry
 
 	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)

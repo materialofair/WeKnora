@@ -1,0 +1,40 @@
+# 便携改造验证记录
+
+日期：2026-09-18。验证主机：macOS ARM64。以下区分新实现的实测结果与复用功能；不把本地 mock 当作公司模型联调结果。
+
+## 已验证
+
+| 范围 | 证据 |
+|---|---|
+| Portable 标准版、无外部数据库启动 | `node scripts/smoke-portable.cjs`：真实 Go binary、健康检查、Web、注册、登录、重启、稳定端口、备份恢复再登录通过 |
+| 完整入库与恢复 | `node scripts/smoke-ingestion.cjs`：真实上传 TXT/DOCX、异步解析、摘要、三种检索、原文引用、停机备份恢复、凭据解密认证、原文件字节一致性通过。模型是本地 mock（8 次 Embedding、2 次 LLM） |
+| 文档解析 | `go test -tags 'sqlite_fts5,anydoc' ./internal/infrastructure/docparser/...`：真实 Rust 转换器、DOCX 图像、CSV、PDF、错误和回退路径通过 |
+| 持久任务 | `go test -race -tags sqlite_fts5 ./internal/router -run TestLocal`：重试、延迟、并发、取消、重启和结果写库故障恢复通过 |
+| 评估存储 | service `TestEvaluation` / `TestMemoryEvaluation`：重启、租户隔离、并发更新和错误路径通过，race 通过 |
+| 图谱 | `go test -tags sqlite_fts5 ./internal/application/repository/retriever/sqlitegraph`：持久化、文档/知识库隔离、关系检索、删除、批量查询通过 |
+| 沙箱绑定 | sandbox `TestSQLiteBindings`：远程绑定保存、CAS、stale、密钥加密、租户隔离、错误路径及 race 通过 |
+| 备份 | portable tests：停机锁、文件恢复、穿越/链接拒绝、截断归档及失败清理通过 |
+| Electron | `npm test --prefix desktop`：地址验证、缺少后端、强制退出等待及即时重启通过；`node desktop/test-electron.cjs <packaged-executable>`：真实登录/设置窗口、无 Node 注入、退出关闭后端通过 |
+| 前端 | `npm ci`、`npm run build`、飞书凭据流程 6 项测试通过；更新依赖后 `npm audit` 无已知漏洞 |
+| 分发 | `node scripts/package-portable.mjs`、`npm run pack --prefix desktop -- --config.mac.identity=null` 在 macOS ARM64 成功；其余平台由 native CI 验证 |
+
+## 能力基线状态
+
+| 能力编号 | 此次处理 | 尚需验收 |
+|---|---|---|
+| CAP-01–06 导入、解析、入库、检索、引用 | 复用现有业务，加入真实原生解析器和本地持久任务 | 公司模型、复杂版面、扫描 OCR、批量真实语料 |
+| CAP-07 Agent | 复用标准版执行/授权流程 | 真实内网模型工具调用、多轮质量与取消行为 |
+| CAP-08–09 Skills/MCP/沙箱 | 保留适配器，补无 Redis 时的远程沙箱绑定持久化 | 公司远程沙箱/MCP地址和权限；本机强隔离未实现 |
+| CAP-10–12 Wiki/记忆/历史 | 保留现有 Go 服务和标准版入口，相关异步任务接入持久队列 | 实际模型驱动生成、召回质量、远程文件检查点 |
+| CAP-13 GraphRAG | 新增 SQLite 关系存储、检索与删除 | 大型图谱性能和抽取质量 |
+| CAP-14 飞书 | 保留 Wiki/Drive 与 IM；移除指定七类数据源 | 私有飞书实际认证、增量同步、回调 |
+| CAP-15–16 模型/权限 | 保留标准版与租户权限，不用 Lite 绕过登录 | 公司身份系统、模型厂商特有协议 |
+| CAP-17 可靠运行 | 持久任务、密钥、备份、恢复、迁移失败中止、桌面生命周期 | Windows/Linux 实机、升级样本；任务至少一次执行，外部副作用仍须幂等 |
+| CAP-18 评估 | 结果持久化，重启中断明确标失败 | 真实基准集与质量门槛 |
+| CAP-19 其他入口 | 保留未明确排除的 Web/API/IM/存储扩展；移除小程序 | 各外部服务单独联调 |
+
+## 已知验证限制
+
+全量 sandbox 测试中的 `TestPolicyAllowsPublicHostname` 在本机失败：DNS 代理将 `api.e2b.dev` 解析为 `198.18.0.18`，被既有地址保护拒绝。其余 sandbox 测试以 `-skip TestPolicyAllowsPublicHostname` 通过。没有修改安全策略来放行该地址。
+
+未获得公司模型/飞书/远程沙箱、Windows 云桌面和服务器环境；相关项不声明完成验收。当前 macOS 制品未签名；Windows GNU 链接和最终 exe、Linux 系统库兼容性需 native CI 与实机结果。Go portable 工具包跨平台编译并不等于完整 Electron 程序已验证。

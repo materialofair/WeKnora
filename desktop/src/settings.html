@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'">
+<title>连接设置</title><link rel="stylesheet" href="settings.css"></head>
+<body><main><p class="eyebrow">KNOWLEDGE ASSISTANT</p><h1>选择知识库运行位置</h1>
+<p>个人资料可保存在本机，也可以连接公司服务器使用团队知识库。</p>
+<form id="connection-form">
+<label class="choice"><input type="radio" name="mode" value="local" checked> 本地运行</label>
+<p class="hint">随应用启动后端，数据保存在当前用户目录。</p>
+<label class="choice"><input type="radio" name="mode" value="remote"> 连接公司服务器</label>
+<label>服务器地址<input id="url" type="url" placeholder="https://knowledge.company.internal"></label>
+<label class="choice"><input id="allowHTTP" type="checkbox"> 允许公司内网 HTTP 连接</label>
+<p class="hint">HTTP 不加密传输，请优先使用公司的 HTTPS 地址。</p>
+<p id="error" role="alert"></p><button type="submit">保存并重新启动</button>
+</form></main><script src="settings.cjs"></script></body></html>

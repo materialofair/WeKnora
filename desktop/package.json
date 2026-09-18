@@ -1,0 +1,76 @@
+{
+  "name": "weknora-assistant-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Offline-ready knowledge assistant with a bundled Go backend",
+  "author": "WeKnora contributors",
+  "license": "MIT",
+  "main": "src/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.cjs",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "test:electron": "node test-electron.cjs"
+  },
+  "devDependencies": {
+    "electron": "44.4.2",
+    "electron-builder": "26.15.3",
+    "playwright-core": "1.63.0"
+  },
+  "build": {
+    "appId": "io.materialofair.knowledgeassistant",
+    "productName": "Knowledge Assistant",
+    "directories": {
+      "output": "../dist/electron"
+    },
+    "files": [
+      "src/**",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.productivity",
+      "extraResources": [
+        {
+          "from": "../dist/portable/darwin-${arch}",
+          "to": "backend"
+        }
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "extraResources": [
+        {
+          "from": "../dist/portable/win32-${arch}",
+          "to": "backend"
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Office",
+      "extraResources": [
+        {
+          "from": "../dist/portable/linux-${arch}",
+          "to": "backend"
+        }
+      ]
+    },
+    "publish": null,
+    "beforePack": "./verify.cjs"
+  }
+}

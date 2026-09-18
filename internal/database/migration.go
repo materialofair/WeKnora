@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -108,6 +110,13 @@ func RunMigrationsWithOptions(dsn string, opts MigrationOptions) error {
 		migrationsPath = "file://migrations/sqlite"
 	}
 
+	if resources := os.Getenv("WEKNORA_RESOURCES_DIR"); resources != "" {
+		variant := "versioned"
+		if opts.SQLiteDBPath != "" {
+			variant = "sqlite"
+		}
+		migrationsPath = (&url.URL{Scheme: "file", Path: filepath.ToSlash(filepath.Join(resources, "migrations", variant))}).String()
+	}
 	var m *migrate.Migrate
 	if opts.SQLiteDBPath != "" {
 		sqlDB, err := sql.Open("sqlite3", opts.SQLiteDBPath)

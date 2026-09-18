@@ -113,16 +113,23 @@ func newTenantSandboxResolver(
 	redisClient *redis.Client,
 	sessionRepo interfaces.SessionRepository,
 	bootstrapper sandbox.SessionBootstrapper,
-) sandbox.TenantSandboxResolver {
+	db *gorm.DB,
+) (sandbox.TenantSandboxResolver, error) {
 	ctx := context.Background()
 
 	// Tenants may configure any supported backend regardless of process startup
 	// mode. Remote configs use this binding store for session persistence.
-	store, storeKind, err := selectSessionBindingStore(redisClient, true)
+	var store sandbox.SessionSandboxBindingStore
+	var storeKind string
+	var err error
+	if os.Getenv("WEKNORA_PORTABLE") == "true" {
+		store, err = sandbox.NewSQLiteSessionSandboxBindingStore(db)
+		storeKind = "sqlite"
+	} else {
+		store, storeKind, err = selectSessionBindingStore(redisClient, true)
+	}
 	if err != nil {
-		logger.Warnf(ctx,
-			"Per-tenant sandbox config disabled: %v", err)
-		return nil
+		return nil, fmt.Errorf("initialize sandbox binding store: %w", err)
 	}
 	resolver, err := sandbox.NewTenantSandboxResolver(sandbox.TenantSandboxResolverDeps{
 		GlobalConfig:    buildGlobalSandboxConfig(),
@@ -134,11 +141,8 @@ func newTenantSandboxResolver(
 		SharedTransport: sandbox.NewGuardedTransport(),
 	})
 	if err != nil {
-		logger.Warnf(ctx,
-			"Failed to initialize tenant sandbox resolver: %v "+
-				"(per-tenant sandbox config disabled)", err)
-		return nil
+		return nil, fmt.Errorf("initialize tenant sandbox resolver: %w", err)
 	}
 	logger.Infof(ctx, "Tenant sandbox resolver configured: binding=%s", storeKind)
-	return resolver
+	return resolver, nil
 }

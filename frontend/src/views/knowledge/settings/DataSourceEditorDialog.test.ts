@@ -22,13 +22,14 @@ async function fixture({ configured = true, create = false } = {}) {
   const calls: Array<{ method: string; args: any[] }> = []
   let storedToken = configured ? 'expired-token' : ''
   const api = {
+    async listResources() { return [] },
     async validateCredentials(type: string, credentials: Record<string, string>) {
       calls.push({ method: 'validateCredentials', args: [type, { ...credentials }] })
-      if (credentials.access_token !== 'rotated-token') throw new Error('gitlab API /user: status 401')
+      if (credentials.app_secret !== 'rotated-token') throw new Error('feishu API /user: status 401')
     },
     async validateConnection(id: string) {
       calls.push({ method: 'validateConnection', args: [id] })
-      if (storedToken !== 'rotated-token') throw new Error('gitlab API /user: status 401')
+      if (storedToken !== 'rotated-token') throw new Error('feishu API /user: status 401')
     },
     async updateDataSource(id: string, data: any) {
       calls.push({ method: 'updateDataSource', args: [id, JSON.parse(JSON.stringify(data))] })
@@ -36,15 +37,15 @@ async function fixture({ configured = true, create = false } = {}) {
     },
     async putDataSourceCredentials(id: string, credentials: Record<string, string>) {
       calls.push({ method: 'putDataSourceCredentials', args: [id, { ...credentials }] })
-      storedToken = credentials.access_token
+      storedToken = credentials.app_secret
     },
   }
   const props = reactive({
     visible: false, kbId: 'kb-one',
     dataSource: create ? null : {
-      id: 'source-one', name: 'GitLab', type: 'gitlab',
+      id: 'source-one', name: 'Feishu', type: 'feishu',
       credentials: { credentials: { configured } },
-      config: { resource_ids: [], settings: { projects: [{ project_id: '123', paths: [] }] } },
+      config: { resource_ids: ['wiki-one'], settings: {} },
       sync_schedule: '0 0 */6 * * *', sync_mode: 'incremental',
       conflict_strategy: 'overwrite', sync_deletions: true,
     },
@@ -76,20 +77,20 @@ async function fixture({ configured = true, create = false } = {}) {
   const vm = instance.value
   async function replace(token = 'rotated-token') {
     vm.enterReplaceCredentials()
-    vm.form.config.credentials = { base_url: 'https://gitlab.example.com', access_token: token }
+    vm.form.config.credentials = { base_url: 'https://feishu.example.com', app_id: 'cli_test', app_secret: token }
     await nextTick()
   }
   return { vm, calls, replace, storedToken: () => storedToken, close: () => app.unmount() }
 }
 
-test('rotated GitLab credentials are tested without updating the saved data source', async () => {
+test('rotated Feishu credentials are tested without updating the saved data source', async () => {
   const f = await fixture()
   try {
     await f.replace()
     await f.vm.testConnection()
     assert.equal(f.vm.testResult, 'success')
-    assert.deepEqual(f.calls, [{ method: 'validateCredentials', args: ['gitlab', {
-      base_url: 'https://gitlab.example.com', access_token: 'rotated-token',
+    assert.deepEqual(f.calls, [{ method: 'validateCredentials', args: ['feishu', {
+      base_url: 'https://feishu.example.com', app_id: 'cli_test', app_secret: 'rotated-token',
     }] }])
     assert.equal(f.storedToken(), 'expired-token')
   } finally { f.close() }
@@ -147,10 +148,10 @@ test('an existing data source with no saved credentials tests the entered token'
   } finally { f.close() }
 })
 
-test('new GitLab data sources continue to test credentials without persistence', async () => {
+test('new Feishu data sources continue to test credentials without persistence', async () => {
   const f = await fixture({ create: true })
   try {
-    f.vm.selectType(f.vm.connectorDefs.find((def: any) => def.type === 'gitlab'))
+    f.vm.selectType(f.vm.connectorDefs.find((def: any) => def.type === 'feishu'))
     await f.replace()
     await f.vm.testConnection()
     assert.equal(f.vm.testResult, 'success')

@@ -413,3 +413,18 @@ func LanguageLocaleName(locale string) string {
 		return locale
 	}
 }
+
+type backgroundTaskIDKey struct{}
+
+// WithBackgroundTaskID carries a durable local queue ID through existing task
+// handlers without relying on Asynq's private context keys.
+func WithBackgroundTaskID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, backgroundTaskIDKey{}, id)
+}
+func BackgroundTaskIDFromContext(ctx context.Context) (string, bool) {
+	if ctx == nil {
+		return "", false
+	}
+	id, ok := ctx.Value(backgroundTaskIDKey{}).(string)
+	return id, ok && id != ""
+}

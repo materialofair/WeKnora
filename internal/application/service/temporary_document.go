@@ -362,8 +362,8 @@ func (s *temporaryDocumentService) Process(ctx context.Context, task *asynq.Task
 	}
 	content, images, metadata, parseErr := s.parse(ctx, document)
 	if parseErr != nil {
-		retryCount, hasRetryCount := asynq.GetRetryCount(ctx)
-		maxRetry, hasMaxRetry := asynq.GetMaxRetry(ctx)
+		retryCount, hasRetryCount := backgroundTaskRetryCount(ctx)
+		maxRetry, hasMaxRetry := backgroundTaskMaxRetry(ctx)
 		if hasRetryCount && hasMaxRetry && retryCount < maxRetry {
 			logger.Warnf(ctx, "temporary document parse will retry: document_id=%s attempt=%d/%d err=%v",
 				payload.DocumentID, retryCount+1, maxRetry+1, parseErr)

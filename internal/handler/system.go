@@ -609,6 +609,9 @@ func (h *SystemHandler) getVectorStoreEngine() string {
 
 // getGraphDatabaseEngine returns the graph database engine name
 func (h *SystemHandler) getGraphDatabaseEngine() string {
+	if strings.EqualFold(os.Getenv("GRAPH_DRIVER"), "sqlite") {
+		return "SQLite"
+	}
 	if h.neo4jDriver == nil {
 		return "Not Enabled"
 	}

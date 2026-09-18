@@ -44,6 +44,7 @@ import (
 	postgresRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/postgres"
 	qdrantRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/qdrant"
 	sqliteRetrieverRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/sqlite"
+	"github.com/Tencent/WeKnora/internal/application/repository/retriever/sqlitegraph"
 	tencentVectorDBRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/tencentvectordb"
 	weaviateRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/weaviate"
 	"github.com/Tencent/WeKnora/internal/application/service"
@@ -56,16 +57,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/datasource"
-	confluenceConnector "github.com/Tencent/WeKnora/internal/datasource/connector/confluence"
-	dingtalkConnector "github.com/Tencent/WeKnora/internal/datasource/connector/dingtalk"
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/drive"
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/wiki"
-	gitlabConnector "github.com/Tencent/WeKnora/internal/datasource/connector/gitlab"
-	imaConnector "github.com/Tencent/WeKnora/internal/datasource/connector/ima"
-	notionConnector "github.com/Tencent/WeKnora/internal/datasource/connector/notion"
-	rssConnector "github.com/Tencent/WeKnora/internal/datasource/connector/rss"
-	yuqueConnector "github.com/Tencent/WeKnora/internal/datasource/connector/yuque"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/handler/session"
@@ -165,7 +159,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewUserRepository))
 	must(container.Provide(repository.NewAuthTokenRepository))
 	must(container.Provide(repository.NewSystemSettingRepository))
-	must(container.Provide(neo4jRepo.NewNeo4jRepository))
+	must(container.Provide(initGraphRepository))
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
@@ -422,13 +416,19 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		// single-process and low-volume, so it runs ungated.
 		must(container.Invoke(registerModelConcurrencyLimiter))
 	} else {
-		syncExec := router.NewSyncTaskExecutor()
-		must(container.Provide(func() interfaces.TaskEnqueuer { return syncExec }))
-		must(container.Provide(func() *router.SyncTaskExecutor { return syncExec }))
-		// Lite mode: no Redis means no asynq inspector. SyncTaskExecutor
-		// dispatches inline goroutines that the checkpoint-based abort
-		// already handles.
-		must(container.Provide(router.NewNoopTaskInspector))
+		must(container.Provide(func(db *gorm.DB, cleaner interfaces.ResourceCleaner) (*router.SyncTaskExecutor, error) {
+			if os.Getenv("WEKNORA_PORTABLE") == "true" {
+				executor, err := router.NewDurableTaskExecutor(db)
+				if err != nil {
+					return nil, err
+				}
+				cleaner.Register(executor.Close)
+				return executor, nil
+			}
+			return router.NewSyncTaskExecutor(), nil
+		}))
+		must(container.Provide(func(executor *router.SyncTaskExecutor) interfaces.TaskEnqueuer { return executor }))
+		must(container.Provide(func(executor *router.SyncTaskExecutor) interfaces.TaskInspector { return executor.Inspector() }))
 		// Even without Redis, background ingestion/enrichment can burst the
 		// worker pool against one provider, so install an in-process governor.
 		must(container.Invoke(registerLiteModelConcurrencyLimiter))
@@ -559,6 +559,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		must(container.Invoke(router.RunAsynqServer))
 	} else {
 		must(container.Invoke(router.RegisterSyncHandlers))
+		must(container.Invoke(router.StartDurableTasks))
 	}
 	// Wiki operation rows are durable, while their wake-up triggers may be
 	// lost across a process restart (always in Lite mode, and in Redis mode if
@@ -837,7 +838,7 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 	if os.Getenv("AUTO_MIGRATE") != "false" {
 		logger.Infof(context.Background(), "Running database migrations...")
 
-		autoRecover := os.Getenv("AUTO_RECOVER_DIRTY") != "false"
+		autoRecover := os.Getenv("AUTO_RECOVER_DIRTY") == "true" && os.Getenv("WEKNORA_PORTABLE") != "true"
 		migrationOpts := database.MigrationOptions{
 			AutoRecoverDirty: autoRecover,
 			SQLiteDBPath:     sqliteDBPath,
@@ -846,6 +847,9 @@ func initDatabase(cfg *config.Config) (*gorm.DB, error) {
 		// Run base migrations (all versioned migrations including embeddings)
 		// The embeddings migration will be conditionally executed based on skip_embedding parameter in DSN
 		if err := database.RunMigrationsWithOptions(migrateDSN, migrationOpts); err != nil {
+			if os.Getenv("WEKNORA_PORTABLE") == "true" {
+				return nil, fmt.Errorf("portable migration failed: %w", err)
+			}
 			// Log warning but don't fail startup - migrations might be handled externally
 			logger.Warnf(context.Background(), "Database migration failed: %v", err)
 			logger.Warnf(
@@ -1641,7 +1645,7 @@ func initOllamaService() (*ollama.OllamaService, error) {
 
 func initNeo4jClient() (neo4j.Driver, error) {
 	ctx := context.Background()
-	if strings.ToLower(os.Getenv("NEO4J_ENABLE")) != "true" {
+	if os.Getenv("GRAPH_DRIVER") == "sqlite" || strings.ToLower(os.Getenv("NEO4J_ENABLE")) != "true" {
 		logger.Debugf(ctx, "NOT SUPPORT RETRIEVE GRAPH")
 		return nil, nil
 	}
@@ -1783,27 +1787,6 @@ func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
 	if err := registry.Register(drive.NewDriveConnector(core.RegionLarkDrive)); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register lark_drive connector: %w", err))
 	}
-	if err := registry.Register(notionConnector.NewConnector()); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("register notion connector: %w", err))
-	}
-	if err := registry.Register(confluenceConnector.NewConnector()); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("register confluence connector: %w", err))
-	}
-	if err := registry.Register(yuqueConnector.NewConnector()); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("register yuque connector: %w", err))
-	}
-	if err := registry.Register(dingtalkConnector.NewConnector()); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("register dingtalk connector: %w", err))
-	}
-	if err := registry.Register(imaConnector.NewConnector()); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("register ima connector: %w", err))
-	}
-	if err := registry.Register(rssConnector.NewConnector()); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("register rss connector: %w", err))
-	}
-	if err := registry.Register(gitlabConnector.NewConnector()); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("register gitlab connector: %w", err))
-	}
 
 	// Future connectors will be registered here:
 	// if err := registry.Register(githubConnector.NewConnector()); err != nil { ... }
@@ -1934,4 +1917,11 @@ func startAuditLogRetention(
 		runner.Stop()
 		return nil
 	})
+}
+
+func initGraphRepository(db *gorm.DB, driver neo4j.Driver) (interfaces.RetrieveGraphRepository, error) {
+	if strings.EqualFold(os.Getenv("GRAPH_DRIVER"), "sqlite") {
+		return sqlitegraph.New(db)
+	}
+	return neo4jRepo.NewNeo4jRepository(driver), nil
 }

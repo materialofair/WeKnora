@@ -90,7 +90,6 @@ WeKnora 采用"主服务 + 前端 + 文档解析微服务"的三进程核心架�
 graph LR
     subgraph Clients["客户端"]
         Browser["浏览器 (Vue3 SPA)"]
-        Mini["微信小程序 (miniprogram/)"]
         CLI["CLI / Go SDK (cli/, client/)"]
         MCPC["MCP 客户端 (mcp-server/)"]
         IM["IM 平台 (微信/飞书/钉钉/Slack...)"]
@@ -116,7 +115,6 @@ graph LR
     EXT["外部服务: LLM API / Elasticsearch / OpenSearch / COS / S3 / OSS ..."]
 
     Browser -->|"HTTP / SSE"| FE
-    Mini -->|"HTTP"| APP
     CLI -->|"HTTP"| APP
     MCPC -->|"HTTP (X-API-Key)"| APP
     IM -->|"webhook / SDK 长连接"| APP
@@ -186,7 +184,6 @@ sequenceDiagram
 | `cli/` | `weknora` 命令行工具（约 30 个子命令：部署、日志、备份、诊断等） |
 | `client/` | Go SDK：以 HTTP 客户端形式封装 WeKnora API，供二次开发集成 |
 | `mcp-server/` | Python 实现的 MCP Server（`weknora_mcp_server.py`），把 WeKnora API 暴露为 MCP 工具给 Claude 等 MCP 客户端 |
-| `miniprogram/` | 微信小程序客户端（WXML/WXSS/JS） |
 | `migrations/` | golang-migrate 数据库迁移：`versioned/`（Postgres 主线 `NNNNNN_*.up/down.sql`）、`sqlite/`（Lite 模式）、`paradedb/`、`mysql/` |
 | `config/` | 运行配置：`config.yaml` 主配置、`builtin_agents.yaml` 内置 Agent、`agent_type_presets.yaml` Agent 预设、`builtin_models.yaml.example` 声明式内置模型、`prompt_templates/` 提示词模板 |
 | `docker/` | 各镜像 Dockerfile（app/docreader/sandbox/odl-hybrid）与 searxng 配置 |

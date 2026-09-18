@@ -4,13 +4,29 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/yanyiwu/gojieba"
 )
 
-// Jieba is a global instance of Chinese text segmentation tool
-var Jieba *gojieba.Jieba = newJieba()
+// Jieba initializes on first use, after portable startup has resolved its
+// packaged dictionaries. Loading at package init binds releases to build paths.
+var Jieba = &lazyJieba{}
+
+type lazyJieba struct {
+	once     sync.Once
+	instance *gojieba.Jieba
+}
+
+func (j *lazyJieba) get() *gojieba.Jieba {
+	j.once.Do(func() { j.instance = newJieba() })
+	return j.instance
+}
+func (j *lazyJieba) Cut(text string, hmm bool) []string { return j.get().Cut(text, hmm) }
+func (j *lazyJieba) CutForSearch(text string, hmm bool) []string {
+	return j.get().CutForSearch(text, hmm)
+}
 
 func newJieba() *gojieba.Jieba {
 	dictDir := os.Getenv("JIEBA_DICT_DIR")

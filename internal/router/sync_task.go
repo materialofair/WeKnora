@@ -17,6 +17,7 @@ import (
 // SyncTaskExecutor executes tasks synchronously (in a goroutine) without Redis.
 // Used in Lite mode as a drop-in replacement for *asynq.Client.
 type SyncTaskExecutor struct {
+	local    *localTaskExecutor
 	mu       sync.RWMutex
 	handlers map[string]func(context.Context, *asynq.Task) error
 }
@@ -38,6 +39,9 @@ func (e *SyncTaskExecutor) RegisterHandler(pattern string, handler func(context.
 // Instead of queuing to Redis, it dispatches the task to a goroutine.
 // Supports ProcessIn (delay) and MaxRetry options for parity with asynq.
 func (e *SyncTaskExecutor) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
+	if e.local != nil {
+		return e.local.enqueue(task, opts...)
+	}
 	e.mu.RLock()
 	handler, ok := e.handlers[task.Type()]
 	e.mu.RUnlock()
@@ -160,4 +164,24 @@ func RegisterSyncHandlers(params SyncTaskParams) {
 	params.Executor.RegisterHandler(types.TypeWikiFinalize, params.WikiIngest.Handle)
 	params.Executor.RegisterHandler(types.TypeMemoryExtract, params.MemoryService.Handle)
 	logger.Infof(context.Background(), "[SyncTask] All task handlers registered (Lite mode, no Redis)")
+}
+
+// StartDurableTasks starts the portable worker pool after handler registration.
+func StartDurableTasks(executor *SyncTaskExecutor) error {
+	if executor.local != nil {
+		return executor.local.Start(executor)
+	}
+	return nil
+}
+func (e *SyncTaskExecutor) Close() error {
+	if e.local != nil {
+		return e.local.Close()
+	}
+	return nil
+}
+func (e *SyncTaskExecutor) Inspector() interfaces.TaskInspector {
+	if e.local != nil {
+		return e.local
+	}
+	return NewNoopTaskInspector()
 }

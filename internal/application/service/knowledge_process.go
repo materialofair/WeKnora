@@ -884,8 +884,8 @@ func applyRetryableSummaryFailureState(
 // summaryTaskWillRetry reports whether the current Asynq delivery has another
 // configured attempt remaining. Calls outside an Asynq worker are terminal.
 func summaryTaskWillRetry(ctx context.Context) bool {
-	retried, retryOK := asynq.GetRetryCount(ctx)
-	maxRetry, maxRetryOK := asynq.GetMaxRetry(ctx)
+	retried, retryOK := backgroundTaskRetryCount(ctx)
+	maxRetry, maxRetryOK := backgroundTaskMaxRetry(ctx)
 	if retryOK && maxRetryOK {
 		return retried < maxRetry
 	}
@@ -1530,8 +1530,8 @@ func (s *knowledgeService) ProcessQuestionGeneration(ctx context.Context, t *asy
 // payload.ChunkID and take the per-chunk path instead.
 func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Context, t *asynq.Task, payload types.QuestionGenerationPayload) (retErr error) {
 	taskStartedAt := time.Now()
-	retryCount, _ := asynq.GetRetryCount(ctx)
-	maxRetry, _ := asynq.GetMaxRetry(ctx)
+	retryCount, _ := backgroundTaskRetryCount(ctx)
+	maxRetry, _ := backgroundTaskMaxRetry(ctx)
 
 	exitStatus := "success"
 	totalChunks := 0
@@ -1906,8 +1906,8 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 // are indexed in a single embedding BatchIndex call.
 func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Context, t *asynq.Task, payload types.QuestionGenerationPayload) (retErr error) {
 	taskStartedAt := time.Now()
-	retryCount, _ := asynq.GetRetryCount(ctx)
-	maxRetry, _ := asynq.GetMaxRetry(ctx)
+	retryCount, _ := backgroundTaskRetryCount(ctx)
+	maxRetry, _ := backgroundTaskMaxRetry(ctx)
 
 	// Normalize the batch: prefer ChunkIDs, fall back to a lone ChunkID
 	// (interim per-chunk build) so those in-flight tasks still run.
@@ -3352,8 +3352,8 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	}
 
 	// 获取任务重试信息，用于判断是否是最后一次重试
-	retryCount, _ := asynq.GetRetryCount(ctx)
-	maxRetry, _ := asynq.GetMaxRetry(ctx)
+	retryCount, _ := backgroundTaskRetryCount(ctx)
+	maxRetry, _ := backgroundTaskMaxRetry(ctx)
 	isLastRetry := retryCount >= maxRetry
 
 	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
@@ -4129,7 +4129,7 @@ func (s *knowledgeService) ProcessKnowledgeListReparse(ctx context.Context, t *a
 		return err
 	}
 	ctx = payload.Initiator.Apply(ctx)
-	taskID, _ := asynq.GetTaskID(ctx)
+	taskID, _ := backgroundTaskID(ctx)
 	ctx = withKBActivityTask(ctx, taskID, kbActivityTrigger(ctx))
 
 	logger.Infof(ctx, "Processing knowledge list reparse task for %d knowledge items", len(payload.KnowledgeIDs))

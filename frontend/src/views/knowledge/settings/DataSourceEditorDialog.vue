@@ -103,89 +103,17 @@ function cancelReplaceCredentials() {
   replaceCredentialsMode.value = false
   pendingRemoveCredentials.value = false
   form.value.config.credentials = {}
-  rssAuthHeaders.value = []
   testResult.value = credentialsConfigured.value ? 'success' : ''
   testErrorMsg.value = ''
-}
-
-interface CustomHeaderItem {
-  key: string
-  value: string
-}
-
-const rssAuthHeaders = ref<CustomHeaderItem[]>([])
-
-function serializeAuthHeaders(items: CustomHeaderItem[]): string {
-  return items
-    .filter(h => h.key.trim())
-    .map(h => `${h.key.trim()}: ${h.value}`)
-    .join('\n')
-}
-
-function syncRssAuthHeadersToCredentials() {
-  if (form.value.type !== 'rss') return
-  const serialized = serializeAuthHeaders(rssAuthHeaders.value)
-  if (serialized) {
-    form.value.config.credentials.auth_headers = serialized
-  } else {
-    delete form.value.config.credentials.auth_headers
-  }
-}
-
-// Feed URLs may still live in credentials on older rows (not returned by the
-// API). The backend copies them into settings on read; fall back to the
-// selected feed resource IDs when settings are still empty.
-function hydrateRssFeedUrlsFromConfig(config: { settings?: Record<string, any>; resource_ids?: string[] }) {
-  const settings = config.settings || {}
-  if (String(settings.feed_urls || '').trim()) {
-    return { ...settings }
-  }
-  const ids = config.resource_ids || []
-  if (ids.length === 0) {
-    return { ...settings }
-  }
-  return { ...settings, feed_urls: ids.join('\n') }
-}
-
-function addRssAuthHeader() {
-  rssAuthHeaders.value.push({ key: '', value: '' })
-}
-
-function removeRssAuthHeader(idx: number) {
-  rssAuthHeaders.value.splice(idx, 1)
 }
 
 function needsConnectionTest(): boolean {
   return !(isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value)
 }
 
-function hydrateConfluenceCredentialsFromSettings() {
-  if (form.value.type !== 'confluence') return
-  const settings = form.value.config.settings || {}
-  const creds = form.value.config.credentials || {}
-  form.value.config.credentials = {
-    ...creds,
-    edition: creds.edition || settings.edition || 'server',
-    base_url: creds.base_url || settings.base_url || '',
-    username: creds.username || settings.username || '',
-  }
-}
-
-function syncConfluencePublicFieldsToSettings() {
-  if (form.value.type !== 'confluence') return
-  const creds = form.value.config.credentials || {}
-  form.value.config.settings = {
-    ...(form.value.config.settings || {}),
-    ...(creds.edition ? { edition: creds.edition } : {}),
-    ...(creds.base_url ? { base_url: creds.base_url } : {}),
-    ...(creds.username ? { username: creds.username } : {}),
-  }
-}
-
 function enterReplaceCredentials() {
   pendingRemoveCredentials.value = false
   replaceCredentialsMode.value = true
-  hydrateConfluenceCredentialsFromSettings()
   testResult.value = ''
   testErrorMsg.value = ''
 }
@@ -215,9 +143,8 @@ const expandedResourceIds = ref(new Set<string>())
 // one level at a time instead of traversing the whole tree up front (#1672).
 const loadedChildrenIds = ref(new Set<string>())
 const loadingChildrenIds = ref(new Set<string>())
-// True when the initial listing already returned the whole tree (connectors like
-// Notion populate parent_id on the first call). In that case expanding a node
-// never needs an extra request.
+// True when the initial listing already returned the whole tree. In that
+// case expanding a node never needs an extra request.
 const treeFullyLoaded = ref(false)
 
 // Drive (云盘) root input: the Drive connectors have no "list spaces" API, so
@@ -230,22 +157,6 @@ const driveFolderToken = ref('')
 const driveFolderTokenError = ref('')
 const driveRootLoaded = ref(false)
 const isDriveConnector = (type: string) => type === 'feishu_drive' || type === 'lark_drive'
-const isGitLabConnector = (type: string) => type === 'gitlab'
-
-interface GitLabProjectInput { project_id: string; ref: string; pathsText: string }
-const gitlabProjects = ref<GitLabProjectInput[]>([])
-function syncGitLabProjectsToSettings() {
-  if (!isGitLabConnector(form.value.type)) return
-  form.value.config.settings.projects = gitlabProjects.value
-    .filter(project => project.project_id.trim())
-    .map(project => ({
-      project_id: project.project_id.trim(), ref: project.ref.trim(),
-      paths: project.pathsText.split(/[\n,]/).map(path => path.trim()).filter(Boolean),
-    }))
-}
-function addGitLabProject() { gitlabProjects.value.push({ project_id: '', ref: '', pathsText: '' }) }
-function removeGitLabProject(index: number) { gitlabProjects.value.splice(index, 1); syncGitLabProjectsToSettings() }
-
 // extractDriveFolderToken accepts either a bare folder_token or a Drive folder
 // URL (https://xxx.feishu.cn/drive/folder/<token> or the Lark equivalent
 // https://xxx.larksuite.com/drive/folder/<token>) and returns the token.
@@ -428,8 +339,8 @@ function toggleExpand(id: string) {
 }
 
 // ensureChildrenLoaded fetches the direct children of a node on demand. It is a
-// no-op when the connector already delivered the whole tree in one call (e.g.
-// Notion) or when this node's children have already been fetched.
+// no-op when the connector already delivered the whole tree in one call or
+// when this node's children have already been fetched.
 async function ensureChildrenLoaded(id: string) {
   if (!tempDsId.value) return
   if (loadedChildrenIds.value.has(id) || loadingChildrenIds.value.has(id)) return
@@ -515,8 +426,6 @@ interface ConnectorDef {
     secret?: boolean
     optional?: boolean
     hintKey?: string
-    multiline?: boolean
-    fieldType?: 'custom_headers'
   }[]
 }
 
@@ -598,111 +507,11 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
       { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://open.larksuite.com', optional: true, hintKey: 'datasource.field.baseUrlHint' },
     ],
   },
-  {
-    type: 'notion',
-    available: true,
-    docUrl: 'https://www.notion.so/my-integrations',
-    permissionDocUrl: '',
-    permissionPageUrl: '',
-    requiredPermissions: [],
-    fields: [
-      { key: 'api_key', labelKey: 'datasource.field.integrationToken', placeholder: 'ntn_xxxx', secret: true },
-    ],
-  },
-  {
-    type: 'confluence',
-    available: true,
-    docUrl: 'https://developer.atlassian.com/cloud/confluence/rest/',
-    permissionDocUrl: 'https://developer.atlassian.com/cloud/confluence/rest/',
-    permissionPageUrl: 'https://id.atlassian.com/manage-profile/security/api-tokens',
-    requiredPermissions: [],
-    fields: [
-      { key: 'base_url', labelKey: 'datasource.field.confluenceBaseUrl', placeholder: 'https://confluence.example.com or https://team.atlassian.net/wiki' },
-      { key: 'username', labelKey: 'datasource.field.confluenceUsername', placeholder: 'name or email' },
-      { key: 'password', labelKey: 'datasource.field.confluencePassword', placeholder: 'Server/DC password', secret: true },
-      { key: 'api_token', labelKey: 'datasource.field.confluenceApiToken', placeholder: 'Cloud API token', secret: true },
-    ],
-  },
-  {
-    type: 'yuque',
-    available: true,
-    docUrl: 'https://www.yuque.com/yuque/developer/api',
-    permissionDocUrl: 'https://www.yuque.com/yuque/developer/api',
-    permissionPageUrl: 'https://www.yuque.com/settings/tokens',
-    requiredPermissions: [
-      'repo:read',
-      'doc:read',
-    ],
-    fields: [
-      { key: 'api_token', labelKey: 'datasource.field.apiToken', placeholder: '', secret: true },
-      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://www.yuque.com', optional: true, hintKey: 'datasource.field.baseUrlHint' },
-    ],
-  },
-  {
-    type: 'dingtalk',
-    available: true,
-    docUrl: 'https://open.dingtalk.com/document/development/knowledge-base-overview',
-    permissionDocUrl: 'https://open.dingtalk.com/document/development/get-knowledge-base-list',
-    permissionPageUrl: 'https://open-dev.dingtalk.com/',
-    requiredPermissions: [
-      'Wiki.Workspace.Read',
-      'Wiki.Node.Read',
-      'Storage.File.Read',
-    ],
-    fields: [
-      { key: 'client_id', labelKey: 'datasource.field.clientId', placeholder: 'dingxxxxxxxx' },
-      { key: 'client_secret', labelKey: 'datasource.field.clientSecret', placeholder: '', secret: true },
-      { key: 'operator_id', labelKey: 'datasource.field.operatorId', placeholder: '', hintKey: 'datasource.field.operatorIdHint' },
-    ],
-  },
-  {
-    // Tencent IMA (ima.qq.com). Uses the OpenAPI at /openapi/wiki/v1 with two
-    // static headers (ima-openapi-clientid + ima-openapi-apikey); no OAuth.
-    type: 'ima',
-    available: true,
-    docUrl: 'https://ima.qq.com/agent-interface',
-    permissionDocUrl: 'https://ima.qq.com/agent-interface',
-    permissionPageUrl: 'https://ima.qq.com/agent-interface',
-    requiredPermissions: [],
-    fields: [
-      { key: 'client_id', labelKey: 'datasource.field.imaClientId', placeholder: '', secret: true },
-      { key: 'api_key', labelKey: 'datasource.field.imaApiKey', placeholder: '', secret: true },
-      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://ima.qq.com', optional: true, hintKey: 'datasource.field.baseUrlHint' },
-    ],
-  },
-  {
-    type: 'rss',
-    available: true,
-    docUrl: '',
-    permissionDocUrl: '',
-    permissionPageUrl: '',
-    requiredPermissions: [],
-    fields: [
-      { key: 'auth_headers', labelKey: 'datasource.field.authHeaders', placeholder: '', optional: true, hintKey: 'datasource.field.authHeadersHint', fieldType: 'custom_headers' },
-    ],
-  },
-  {
-    type: 'gitlab', available: true, docUrl: '', permissionDocUrl: '', permissionPageUrl: '', requiredPermissions: [],
-    fields: [
-      { key: 'base_url', labelKey: 'datasource.gitlab.baseUrl', placeholder: 'https://gitlab.example.com' },
-      { key: 'access_token', labelKey: 'datasource.gitlab.accessToken', placeholder: '', secret: true },
-    ],
-  },
 ])
-
 
 const currentDef = computed(() => connectorDefs.value.find(d => d.type === form.value.type))
 
-const displayedCredentialFields = computed(() => {
-  const fields = currentDef.value?.fields || []
-  if (form.value.type !== "confluence") return fields
-
-  return fields.filter((field) => {
-    if (field.key === "password") return form.value.config.credentials.edition !== "cloud"
-    if (field.key === "api_token") return form.value.config.credentials.edition === "cloud"
-    return true
-  })
-})
+const displayedCredentialFields = computed(() => currentDef.value?.fields || [])
 
 // --- Drawer lifecycle ---
 watch(visible, async (v) => {
@@ -732,8 +541,6 @@ watch(visible, async (v) => {
   driveFolderToken.value = ''
   driveFolderTokenError.value = ''
   driveRootLoaded.value = false
-  rssAuthHeaders.value = []
-  gitlabProjects.value = []
 
   if (isEdit.value && props.dataSource) {
     // Reset edit/replace toggle every open so an aborted replace doesn't
@@ -750,9 +557,7 @@ watch(visible, async (v) => {
       config: {
         credentials: {},
         resource_ids: editConfig.resource_ids || [],
-        settings: props.dataSource.type === 'rss'
-          ? hydrateRssFeedUrlsFromConfig(editConfig)
-          : (editConfig.settings || {}),
+        settings: editConfig.settings || {},
       },
       sync_schedule: props.dataSource.sync_schedule,
       sync_mode: props.dataSource.sync_mode,
@@ -760,13 +565,6 @@ watch(visible, async (v) => {
       sync_deletions: props.dataSource.sync_deletions,
     }
     selectedResourceIds.value = form.value.config?.resource_ids || []
-    if (isGitLabConnector(form.value.type)) {
-      const savedProjects = Array.isArray(form.value.config.settings.projects) ? form.value.config.settings.projects : []
-      gitlabProjects.value = savedProjects.map((project: any) => ({
-        project_id: String(project.project_id || ''), ref: String(project.ref || ''),
-        pathsText: Array.isArray(project.paths) ? project.paths.join('\n') : '',
-      }))
-    }
     // Pre-fill the Drive root folder_token from the saved resource_ids so the
     // user sees what they previously entered. driveRootLoaded stays false: the
     // tree has not been listed yet, and clicking "load" triggers listResources
@@ -806,50 +604,20 @@ watch(
   { deep: true },
 )
 
-watch(
-  rssAuthHeaders,
-  () => {
-    syncRssAuthHeadersToCredentials()
-    if (needsConnectionTest()) {
-      testResult.value = ''
-      testErrorMsg.value = ''
-    }
-  },
-  { deep: true },
-)
-
-watch(
-  () => form.value.config.settings.feed_urls,
-  () => {
-    if (needsConnectionTest()) {
-      testResult.value = ''
-      testErrorMsg.value = ''
-    }
-  },
-)
-
 function selectType(def: ConnectorDef) {
   if (!def.available) return
   form.value.type = def.type
   form.value.name = t(`datasource.connector.${def.type}`)
-  form.value.config.credentials = def.type === "confluence" ? { edition: "server" } : {}
-  if (def.type === 'confluence') {
-    form.value.config.settings = { ...form.value.config.settings, edition: 'server' }
-  }
-  if (isGitLabConnector(def.type)) addGitLabProject()
-  rssAuthHeaders.value = []
+  form.value.config.credentials = {}
   step.value = 1
 }
 
 // --- Test connection ---
 async function testConnection() {
-  syncRssAuthHeadersToCredentials()
-  syncConfluencePublicFieldsToSettings()
-  if (!validateRssFeedUrls()) return
   if (!isEdit.value || !credentialsConfigured.value || replaceCredentialsMode.value) {
     const fields = displayedCredentialFields.value
     for (const f of fields) {
-      if (f.optional || f.fieldType === 'custom_headers') continue
+      if (f.optional) continue
       if (!form.value.config.credentials[f.key]) {
         MessagePlugin.warning(`${t(f.labelKey)} ${t('datasource.isRequired')}`)
         return
@@ -872,10 +640,6 @@ async function testConnection() {
       await validateConnection(tempDsId.value)
     } else {
       const creds = { ...form.value.config.credentials }
-      if (form.value.type === 'rss') {
-        // validate-credentials is credentials-only; feed URLs live in settings.
-        creds.feed_urls = form.value.config.settings.feed_urls
-      }
       await validateCredentials(form.value.type, creds)
     }
     testResult.value = 'success'
@@ -892,7 +656,6 @@ async function testConnection() {
 async function loadResources() {
   loadingResources.value = true
   try {
-    syncConfluencePublicFieldsToSettings()
     if (!tempDsId.value) {
       const res = await createDataSource({
         ...form.value,
@@ -910,8 +673,7 @@ async function loadResources() {
 
     const res = await listResources(tempDsId.value)
     resources.value = res?.data || res || []
-    // Any parent that already arrived with children (connectors returning the
-    // full tree, e.g. Notion) needs no further lazy fetch.
+    // Any parent that already arrived with children needs no further lazy fetch.
     const parentsWithChildren = new Set<string>()
     for (const r of resources.value) {
       if (r.parent_id) parentsWithChildren.add(r.parent_id)
@@ -1031,25 +793,14 @@ function toggleResource(id: string) {
   selectedResourceIds.value = [...cover]
 }
 
-function validateRssFeedUrls(): boolean {
-  if (form.value.type !== 'rss') return true
-  if (!String(form.value.config.settings.feed_urls || '').trim()) {
-    MessagePlugin.warning(`${t('datasource.field.feedUrls')} ${t('datasource.isRequired')}`)
-    return false
-  }
-  return true
-}
-
 function validateStep1Fields(): boolean {
-  syncRssAuthHeadersToCredentials()
-  if (!validateRssFeedUrls()) return false
   if (isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value) {
     return true
   }
 
   const fields = displayedCredentialFields.value
   for (const f of fields) {
-    if (f.optional || f.fieldType === 'custom_headers') continue
+    if (f.optional) continue
     if (!form.value.config.credentials[f.key]) {
       MessagePlugin.warning(`${t(f.labelKey)} ${t('datasource.isRequired')}`)
       return false
@@ -1075,13 +826,6 @@ async function nextStep() {
     }
     driveFolderTokenError.value = ''
   }
-  if (step.value === 2 && isGitLabConnector(form.value.type)) {
-    syncGitLabProjectsToSettings()
-    if (!gitlabProjects.value.some(project => project.project_id.trim())) {
-      MessagePlugin.warning(t('datasource.gitlab.projectRequired'))
-      return
-    }
-  }
   step.value++
   if (step.value === 2) {
     // Drive connectors need a user-supplied folder_token before listing.
@@ -1094,7 +838,6 @@ async function nextStep() {
       }
       return
     }
-    if (isGitLabConnector(form.value.type)) return
     loadResources()
   }
 }
@@ -1113,8 +856,6 @@ function prevStep() {
 // commitCredentialsIfNeeded). Sending an empty map keeps the backend
 // validator happy.
 function buildConfigPayload(): Record<string, unknown> {
-  syncGitLabProjectsToSettings()
-  syncConfluencePublicFieldsToSettings()
   return {
     credentials: isEdit.value ? {} : { ...form.value.config.credentials },
     resource_ids: form.value.config.resource_ids,
@@ -1127,8 +868,6 @@ function buildConfigPayload(): Record<string, unknown> {
 // the whole submit on failure so we don't leave the row partially saved.
 async function commitCredentialsIfNeeded(dsId: string): Promise<boolean> {
   if (!isEdit.value || !replaceCredentialsMode.value) return true
-  syncRssAuthHeadersToCredentials()
-  syncConfluencePublicFieldsToSettings()
   const filled = Object.entries(form.value.config.credentials).filter(
     ([, v]) => typeof v === 'string' ? v !== '' : v != null,
   )
@@ -1138,7 +877,6 @@ async function commitCredentialsIfNeeded(dsId: string): Promise<boolean> {
     credentialsConfigured.value = true
     replaceCredentialsMode.value = false
     form.value.config.credentials = {}
-    rssAuthHeaders.value = []
     return true
   } catch (e: any) {
     MessagePlugin.error(e?.message || e?.error || t('credential.saveFailed'))
@@ -1299,7 +1037,7 @@ const drawerConfirmText = computed(() => {
     v-model:visible="visible"
     :title="drawerTitle"
     :description="drawerDescription"
-    :class="[form.type ? `datasource-editor-drawer datasource-editor-drawer--${form.type}` : 'datasource-editor-drawer', { 'ds-fixed-step': step === 2 && !isGitLabConnector(form.type) }]"
+    :class="[form.type ? `datasource-editor-drawer datasource-editor-drawer--${form.type}` : 'datasource-editor-drawer', { 'ds-fixed-step': step === 2 }]"
     :hide-footer="step === 0"
     :confirm-text="drawerConfirmText"
     :confirm-loading="submitting || (step === 1 && testing)"
@@ -1478,21 +1216,6 @@ const drawerConfirmText = computed(() => {
         </div>
       </section>
 
-      <section v-if="form.type === 'rss'" class="setting-drawer__section">
-        <h4 class="setting-drawer__section-title">{{ t('datasource.field.feedUrls') }}</h4>
-        <div class="form-item">
-          <label class="form-label required">{{ t('datasource.field.feedUrls') }}</label>
-          <t-textarea
-            v-model="form.config.settings.feed_urls"
-            placeholder="https://example.com/feed.xml"
-            :autosize="{ minRows: 2, maxRows: 6 }"
-            autocomplete="off"
-            spellcheck="false"
-          />
-          <p class="form-desc">{{ t('datasource.field.feedUrlsHint') }}</p>
-        </div>
-      </section>
-
       <section class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ t('datasource.credentialsLabel') }}</h4>
 
@@ -1556,80 +1279,24 @@ const drawerConfirmText = computed(() => {
         </div>
 
         <template v-else-if="credentialsInputVisible">
-          <div v-if="form.type === 'confluence'" class="form-item">
-            <label class="form-label">{{ t('datasource.field.confluenceEdition') }}</label>
-            <t-select v-model="form.config.credentials.edition">
-              <t-option value="server" :label="t('datasource.field.confluenceEditionServer')" />
-              <t-option value="cloud" :label="t('datasource.field.confluenceEditionCloud')" />
-            </t-select>
-          </div>
           <div
             v-for="field in displayedCredentialFields"
             :key="field.key"
             class="form-item"
           >
-            <template v-if="field.fieldType === 'custom_headers'">
-              <div class="custom-headers-header">
-                <label class="form-label" style="margin-bottom: 0;">{{ t(field.labelKey) }}</label>
-                <t-button variant="text" size="small" theme="primary" @click="addRssAuthHeader">
-                  <template #icon><t-icon name="add" /></template>
-                  {{ t('model.editor.customHeadersAdd') }}
-                </t-button>
-              </div>
-              <p v-if="field.hintKey" class="form-desc custom-headers-desc">{{ t(field.hintKey) }}</p>
-              <div v-if="rssAuthHeaders.length > 0" class="custom-headers-list">
-                <div v-for="(item, idx) in rssAuthHeaders" :key="idx" class="custom-header-row">
-                  <t-input
-                    v-model="item.key"
-                    :placeholder="t('model.editor.customHeadersKeyPlaceholder')"
-                    class="custom-header-key"
-                    autocomplete="off"
-                    spellcheck="false"
-                  />
-                  <t-input
-                    v-model="item.value"
-                    :placeholder="t('model.editor.customHeadersValuePlaceholder')"
-                    class="custom-header-value"
-                    autocomplete="off"
-                    spellcheck="false"
-                  />
-                  <t-button
-                    variant="text"
-                    shape="square"
-                    size="small"
-                    class="custom-header-remove"
-                    :aria-label="t('common.delete')"
-                    @click="removeRssAuthHeader(idx)"
-                  >
-                    <t-icon name="close" />
-                  </t-button>
-                </div>
-              </div>
-            </template>
-            <template v-else>
-              <label class="form-label" :class="{ required: !field.optional }">
-                {{ t(field.labelKey) }}
-              </label>
-              <t-textarea
-                v-if="field.multiline"
-                v-model="form.config.credentials[field.key]"
-                :placeholder="field.placeholder || t('credential.inputPlaceholder')"
-                :autosize="{ minRows: 2, maxRows: 6 }"
-                autocomplete="off"
-                spellcheck="false"
-              />
-              <t-input
-                v-else
-                v-model="form.config.credentials[field.key]"
-                :placeholder="field.placeholder || t('credential.inputPlaceholder')"
-                :type="field.secret ? 'password' : 'text'"
-                autocomplete="off"
-                spellcheck="false"
-              >
-                <template v-if="field.secret" #prefix-icon><t-icon name="lock-on" /></template>
-              </t-input>
-              <p v-if="field.hintKey" class="form-desc">{{ t(field.hintKey) }}</p>
-            </template>
+            <label class="form-label" :class="{ required: !field.optional }">
+              {{ t(field.labelKey) }}
+            </label>
+            <t-input
+              v-model="form.config.credentials[field.key]"
+              :placeholder="field.placeholder || t('credential.inputPlaceholder')"
+              :type="field.secret ? 'password' : 'text'"
+              autocomplete="off"
+              spellcheck="false"
+            >
+              <template v-if="field.secret" #prefix-icon><t-icon name="lock-on" /></template>
+            </t-input>
+            <p v-if="field.hintKey" class="form-desc">{{ t(field.hintKey) }}</p>
           </div>
           <div v-if="isEdit && replaceCredentialsMode" class="credential-edit-actions">
             <t-button size="small" variant="text" @click="cancelReplaceCredentials">
@@ -1642,26 +1309,6 @@ const drawerConfirmText = computed(() => {
 
     <!-- Step 2: Select resources -->
     <section v-if="step === 2" class="setting-drawer__section ds-resource-section">
-      <template v-if="isGitLabConnector(form.type)">
-        <h4 class="setting-drawer__section-title">{{ t('datasource.gitlab.projects') }}</h4>
-        <p class="ds-resource-hint">{{ t('datasource.gitlab.projectsHint') }}</p>
-        <div class="gitlab-project-list">
-          <div v-for="(project, index) in gitlabProjects" :key="index" class="gitlab-project-row">
-            <div class="gitlab-project-row__header">
-              <strong>{{ t('datasource.gitlab.project') }} {{ index + 1 }}</strong>
-              <t-button variant="text" size="small" theme="danger" @click="removeGitLabProject(index)"><t-icon name="delete" /></t-button>
-            </div>
-            <label class="form-label required">{{ t('datasource.gitlab.projectId') }}</label>
-            <t-input v-model="project.project_id" :placeholder="t('datasource.gitlab.projectIdPlaceholder')" />
-            <label class="form-label">{{ t('datasource.gitlab.ref') }}</label>
-            <t-input v-model="project.ref" :placeholder="t('datasource.gitlab.refPlaceholder')" />
-            <label class="form-label">{{ t('datasource.gitlab.paths') }}</label>
-            <t-textarea v-model="project.pathsText" :placeholder="t('datasource.gitlab.pathsPlaceholder')" :autosize="{ minRows: 2, maxRows: 5 }" />
-          </div>
-          <t-button variant="outline" @click="addGitLabProject"><template #icon><t-icon name="add" /></template>{{ t('datasource.gitlab.addProject') }}</t-button>
-        </div>
-      </template>
-      <template v-else>
       <h4 class="setting-drawer__section-title">{{ t('datasource.step.resources') }}</h4>
       <p class="ds-resource-hint">{{ t('datasource.resourceHint') }}</p>
 
@@ -1823,7 +1470,6 @@ const drawerConfirmText = computed(() => {
           </a>
         </div>
       </div>
-      </template>
     </section>
 
     <!-- Step 3: Sync strategy -->
@@ -2636,55 +2282,6 @@ const drawerConfirmText = computed(() => {
   gap: 16px;
 }
 
-.custom-headers-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
-}
-
-.custom-headers-desc {
-  margin: 0 0 10px 0;
-  font-size: var(--app-text-sm);
-  line-height: 1.5;
-  color: var(--td-text-color-placeholder);
-}
-
-.custom-headers-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.custom-header-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-
-  .custom-header-key {
-    flex: 0 0 38%;
-  }
-
-  .custom-header-value {
-    flex: 1;
-  }
-
-  .custom-header-remove {
-    flex-shrink: 0;
-    width: 32px;
-    height: 32px;
-    padding: 0;
-    color: var(--td-text-color-placeholder);
-    border-radius: var(--app-radius-sm);
-    transition: all 0.18s ease;
-
-    &:hover {
-      background: var(--td-error-color-light);
-      color: var(--td-error-color);
-    }
-  }
-}
-
 .ds-empty-retry {
   padding: 0;
   border: none;
@@ -2750,26 +2347,6 @@ const drawerConfirmText = computed(() => {
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
 }
 
-.gitlab-project-list {
-  display: grid;
-  gap: 12px;
-  margin-bottom: 20px;
-}
-
-.gitlab-project-row {
-  display: grid;
-  gap: 8px;
-  padding: 12px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: var(--app-radius-sm);
-  background: var(--td-bg-color-container);
-}
-
-.gitlab-project-row__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
 </style>
 
 <!--

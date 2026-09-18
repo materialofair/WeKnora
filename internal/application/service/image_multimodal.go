@@ -411,9 +411,9 @@ func (s *ImageMultimodalService) shouldDropOrphanedMultimodal(
 // invoked outside an asynq worker, as in unit tests). Treating that case as
 // "not final" keeps test ergonomics — tests should drive finalize explicitly.
 func isFinalAsynqAttempt(ctx context.Context) bool {
-	retried, ok := asynq.GetRetryCount(ctx)
+	retried, ok := backgroundTaskRetryCount(ctx)
 	if ok {
-		maxRetry, maxRetryOK := asynq.GetMaxRetry(ctx)
+		maxRetry, maxRetryOK := backgroundTaskMaxRetry(ctx)
 		if maxRetryOK {
 			return retried >= maxRetry
 		}

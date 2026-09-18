@@ -503,8 +503,8 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 	srcKB, dstKB, err := s.kbService.CopyKnowledgeBase(ctx, payload.SourceID, payload.TargetID)
 	if err != nil {
 		retry, maxRetry := 0, 0
-		retry, _ = asynq.GetRetryCount(ctx)
-		maxRetry, _ = asynq.GetMaxRetry(ctx)
+		retry, _ = backgroundTaskRetryCount(ctx)
+		maxRetry, _ = backgroundTaskMaxRetry(ctx)
 		status := types.KBCloneStatusProcessing
 		if retry >= maxRetry {
 			status = types.KBCloneStatusFailed
@@ -525,8 +525,8 @@ func (s *knowledgeService) ProcessKBClone(ctx context.Context, t *asynq.Task) er
 	}
 
 	// Check if this is the last retry
-	retryCount, _ := asynq.GetRetryCount(ctx)
-	maxRetry, _ := asynq.GetMaxRetry(ctx)
+	retryCount, _ := backgroundTaskRetryCount(ctx)
+	maxRetry, _ := backgroundTaskMaxRetry(ctx)
 	isLastRetry := retryCount >= maxRetry
 
 	logger.Infof(ctx, "Processing KB clone task: %s, source: %s, target: %s, retry: %d/%d",
@@ -1098,8 +1098,8 @@ func (s *knowledgeService) ProcessKnowledgeMove(ctx context.Context, t *asynq.Ta
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
 	// No item is claimed and no failure callback can alter document state until
 	// every requested document and its children passed the same pair preflight.
-	retry, _ := asynq.GetRetryCount(ctx)
-	maxRetry, _ := asynq.GetMaxRetry(ctx)
+	retry, _ := backgroundTaskRetryCount(ctx)
+	maxRetry, _ := backgroundTaskMaxRetry(ctx)
 	items, err := s.planKnowledgeMove(ctx, sourceKB, targetKB, payload.KnowledgeIDs, payload.Mode)
 	if err != nil {
 		status := types.KBCloneStatusProcessing

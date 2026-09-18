@@ -24,7 +24,7 @@ target=${TARGET:-$(rustc -vV | sed -n 's/^host: //p')}
 case "$target" in
   x86_64-apple-darwin) lib_dir=darwin_amd64 ;;
   aarch64-apple-darwin) lib_dir=darwin_arm64 ;;
-  x86_64-pc-windows-msvc) lib_dir=windows_amd64 ;;
+  x86_64-pc-windows-msvc|x86_64-pc-windows-gnu) lib_dir=windows_amd64 ;;
   x86_64-unknown-linux-gnu) lib_dir=linux_amd64_gnu ;;
   aarch64-unknown-linux-gnu) lib_dir=linux_arm64_gnu ;;
   x86_64-unknown-linux-musl) lib_dir=linux_amd64_musl ;;

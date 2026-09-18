@@ -191,8 +191,8 @@ func (s *wikiIngestService) newWikiBatchContext(
 
 func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task) error {
 	taskStartedAt := time.Now()
-	retryCount, _ := asynq.GetRetryCount(ctx)
-	maxRetry, _ := asynq.GetMaxRetry(ctx)
+	retryCount, _ := backgroundTaskRetryCount(ctx)
+	maxRetry, _ := backgroundTaskMaxRetry(ctx)
 
 	var payload WikiIngestPayload
 	exitStatus := "success"

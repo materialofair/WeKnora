@@ -24,10 +24,16 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
+	"github.com/Tencent/WeKnora/internal/handler"
+	"github.com/Tencent/WeKnora/internal/portable"
+	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -40,6 +46,44 @@ import (
 )
 
 func main() {
+	portableMode := flag.Bool("portable", false, "Run with embedded storage and durable local tasks")
+	dataDir := flag.String("data-dir", "", "Writable application data directory")
+	resourcesDir := flag.String("resources-dir", "", "Directory containing config, migrations and web")
+	host := flag.String("host", "", "HTTP bind host")
+	port := flag.Int("port", -1, "HTTP port; 0 selects an available port")
+	readyFile := flag.String("ready-file", "", "Atomically publish bound address as JSON")
+	exitOnStdinClose := flag.Bool("exit-on-stdin-close", false, "Gracefully stop when parent closes stdin")
+	flag.Parse()
+	if *port < -1 || *port > 65535 {
+		fmt.Fprintln(os.Stderr, "invalid --port")
+		os.Exit(1)
+	}
+
+	if *portableMode {
+		if *dataDir == "" {
+			fmt.Fprintln(os.Stderr, "portable mode requires --data-dir")
+			os.Exit(1)
+		}
+		unlock, err := portable.LockData(*dataDir)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		defer unlock()
+		if err := portable.Prepare(portable.Options{DataDir: *dataDir, ResourcesDir: *resourcesDir}); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		handler.Edition = "standard"
+	}
+
+	if *readyFile != "" {
+		if err := os.Remove(*readyFile); err != nil && !os.IsNotExist(err) {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
+	logger.ConfigureFromEnv()
 	// Set Gin mode
 	if os.Getenv("GIN_MODE") == "release" {
 		gin.SetMode(gin.ReleaseMode)
@@ -73,13 +117,30 @@ func main() {
 			Handler: router,
 		}
 
-		addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
+		if *portableMode {
+			cfg.Server.Host = "127.0.0.1"
+		}
+		if *host != "" {
+			cfg.Server.Host = *host
+		}
+		if *port >= 0 {
+			cfg.Server.Port = *port
+		}
+		addr := net.JoinHostPort(cfg.Server.Host, strconv.Itoa(cfg.Server.Port))
 		listener, err := listenWithRetry(addr, 10, 300*time.Millisecond)
 		if err != nil {
 			return fmt.Errorf("failed to start server: %v", err)
 		}
 
+		defer listener.Close()
+		if err := portable.WriteReady(*readyFile, listener.Addr().String()); err != nil {
+			return fmt.Errorf("write ready file: %w", err)
+		}
+		if *readyFile != "" {
+			defer os.Remove(*readyFile)
+		}
 		ctx, done := context.WithCancel(context.Background())
+		defer done()
 
 		// Start the system_settings pubsub subscriber. Runs in its own
 		// goroutine and exits when ctx is cancelled at shutdown. Best-
@@ -92,8 +153,19 @@ func main() {
 
 		signals := make(chan os.Signal, 1)
 		signal.Notify(signals, shutdownSignals...)
+		defer signal.Stop(signals)
+		parentClosed := make(chan struct{})
+		if *exitOnStdinClose {
+			go func() { _, _ = io.Copy(io.Discard, os.Stdin); close(parentClosed) }()
+		}
 		go func() {
-			sig := <-signals
+			var sig os.Signal
+			select {
+			case sig = <-signals:
+			case <-parentClosed:
+			case <-ctx.Done():
+				return
+			}
 			logger.Infof(context.Background(), "Received signal: %v, starting server shutdown...", sig)
 
 			// Close listener first to release port immediately,
@@ -129,8 +201,8 @@ func main() {
 		}()
 
 		runtime.LogGinRouteCount(context.Background())
-		logger.Infof(context.Background(), "Server is running at %s", addr)
-		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+		logger.Infof(context.Background(), "Server is running at %s", listener.Addr().String())
+		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed && err != net.ErrClosed {
 			return fmt.Errorf("server error: %v", err)
 		}
 
