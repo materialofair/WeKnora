@@ -32,7 +32,7 @@ mkdirSync(join(output, 'jieba'), { recursive: true });
 for (const name of ['jieba.dict.utf8', 'hmm_model.utf8', 'user.dict.utf8', 'idf.utf8', 'stop_words.utf8']) {
   cpSync(join(jieba, 'deps', 'cppjieba', 'dict', name), join(output, 'jieba', name));
 }
-cpSync(join(root, 'LICENSE'), join(output, 'LICENSE'));
+run('bash', ['scripts/copy-licenses.sh', output]);
 cpSync(join(root, 'docs', 'portable.md'), join(output, 'README.md'));
 writeFileSync(join(output, 'start.sh'), '#!/bin/sh\nset -eu\nbase=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec "$base/server" --portable --resources-dir "$base" --data-dir "${WEKNORA_DATA_DIR:-$base/data}" --host "${WEKNORA_HOST:-127.0.0.1}" --port "${WEKNORA_PORT:-8080}"\n', { mode: 0o755 });
 writeFileSync(join(output, 'start.cmd'), '@echo off\r\nif not defined WEKNORA_DATA_DIR set "WEKNORA_DATA_DIR=%~dp0data"\r\nif not defined WEKNORA_HOST set "WEKNORA_HOST=127.0.0.1"\r\nif not defined WEKNORA_PORT set "WEKNORA_PORT=8080"\r\n"%~dp0server.exe" --portable --resources-dir "%~dp0." --data-dir "%WEKNORA_DATA_DIR%" --host "%WEKNORA_HOST%" --port "%WEKNORA_PORT%"\r\n');

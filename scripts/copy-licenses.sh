@@ -16,6 +16,9 @@ bash "${license_root}/scripts/check-license-bundle.sh"
 source_stage="$(mktemp -d)"
 trap 'rm -rf "${source_stage}"' EXIT
 module_cache="$(cd "${license_root}" && go env GOMODCACHE)"
+if command -v cygpath >/dev/null 2>&1; then
+    module_cache="$(cygpath -u "$module_cache")"
+fi
 while read -r module_name module_version _checksum; do
     (cd "${license_root}" && go mod download "${module_name}@${module_version}")
     cp "${module_cache}/cache/download/${module_name}/@v/${module_version}.zip" \
