@@ -1,9 +1,9 @@
 const { existsSync } = require('node:fs');
 const path = require('node:path');
-const { archToString } = require('builder-util');
+const { Arch } = require('builder-util');
 module.exports = async context => {
   const platform = context.electronPlatformName;
-  const directory = path.resolve(__dirname, '../dist/portable', `${platform}-${archToString(context.arch)}`);
+  const directory = path.resolve(__dirname, '../dist/portable', `${platform}-${Arch[context.arch]}`);
   const extension = platform === 'win32' ? '.exe' : '';
   for (const name of [`server${extension}`, `assistant-backup${extension}`, 'config/config.yaml',
     'migrations/sqlite', 'web/index.html', 'jieba/jieba.dict.utf8', 'LICENSE', 'README.md']) {
