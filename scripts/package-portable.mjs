@@ -22,7 +22,16 @@ const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 run(npm, ['run', 'build'], { cwd: join(root, 'frontend'), shell: process.platform === 'win32' });
 run('bash', ['scripts/build-anydoc-lib.sh']);
 const env = { ...process.env, CGO_ENABLED: '1' };
+// A cloud desktop must not need MinGW DLLs installed alongside the app.
+if (process.platform === 'win32') {
+  env.CGO_LDFLAGS = `${env.CGO_LDFLAGS || ''} -static -static-libgcc -static-libstdc++`;
+}
 run('go', ['build', '-tags', 'sqlite_fts5,anydoc', '-ldflags', '-s -w', '-o', join(output, `server${exe}`), './cmd/server'], { env });
+if (process.platform === 'win32') {
+  const imports = capture('objdump', ['-p', join(output, `server${exe}`)]);
+  const externalRuntime = imports.split('\n').filter(line => /DLL Name:/i.test(line) && /lib(gcc|stdc|winpthread|c\+\+)/i.test(line));
+  if (externalRuntime.length) throw new Error(`Unbundled compiler runtime: ${externalRuntime.join(', ')}`);
+}
 run('go', ['build', '-ldflags', '-s -w', '-o', join(output, `assistant-backup${exe}`), './cmd/assistant-backup'], { env });
 for (const [source, destination] of [['config', 'config'], ['migrations', 'migrations'], ['frontend/dist', 'web']]) {
   cpSync(join(root, source), join(output, destination), { recursive: true });
