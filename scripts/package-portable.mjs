@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Build on each target OS; end users only run the generated executables.
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import { cpSync, mkdirSync, writeFileSync, existsSync, mkdtempSync, renameSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,8 +43,18 @@ if (process.platform === 'win32') {
 }
 run('go', ['build', '-tags', 'sqlite_fts5,anydoc', '-ldflags', '-s -w', '-o', join(output, `server${exe}`), './cmd/server'], { env });
 if (process.platform === 'win32') {
-  const imports = capture('objdump', ['-p', join(output, `server${exe}`)]);
-  const externalRuntime = imports.split('\n').filter(line => /DLL Name:/i.test(line) && /lib(gcc|stdc|winpthread|c\+\+)/i.test(line));
+  // PE unwind tables can exceed spawnSync's buffer; inspect DLL lines as a stream.
+  const externalRuntime = await new Promise((resolve, reject) => {
+    const inspector = spawn('objdump', ['-p', join(output, `server${exe}`)], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+    const dependencies = new Set();
+    let errors = '';
+    createInterface({ input: inspector.stdout }).on('line', line => {
+      if (/DLL Name:/i.test(line) && /lib(gcc|stdc|winpthread|c\+\+)/i.test(line)) dependencies.add(line.trim());
+    });
+    inspector.stderr.on('data', chunk => { errors = (errors + chunk.toString()).slice(-8192); });
+    inspector.on('error', reject);
+    inspector.on('close', code => code === 0 ? resolve([...dependencies]) : reject(new Error(`objdump failed (${code}): ${errors}`)));
+  });
   if (externalRuntime.length) throw new Error(`Unbundled compiler runtime: ${externalRuntime.join(', ')}`);
 }
 run('go', ['build', '-ldflags', '-s -w', '-o', join(output, `assistant-backup${exe}`), './cmd/assistant-backup'], { env });
