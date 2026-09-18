@@ -20,6 +20,16 @@ function capture(command, args) {
   if (r.status !== 0) throw new Error(r.stderr || String(r.error));
   return r.stdout.trim();
 }
+if (process.platform === 'win32') {
+  // DuckDB's pinned static library predates GCC 16's Windows TLS ABI change.
+  const gccVersion = capture(process.env.CC || 'gcc', ['-dumpfullversion']);
+  if (Number.parseInt(gccVersion, 10) >= 16) {
+    throw new Error(`DuckDB requires the GCC 15 UCRT64 toolchain; found GCC ${gccVersion}. See docs/portable.md.`);
+  }
+  if (process.env.MSYSTEM && process.env.MSYSTEM !== 'UCRT64') {
+    throw new Error('Build from the MSYS2 UCRT64 shell; DuckDB does not support the MINGW64 CRT.');
+  }
+}
 mkdirSync(output, { recursive: true });
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 run(npm, ['run', 'build'], { cwd: join(root, 'frontend'), shell: process.platform === 'win32',

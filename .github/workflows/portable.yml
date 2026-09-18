@@ -29,6 +29,17 @@ jobs:
           msystem: UCRT64
           path-type: inherit
           install: mingw-w64-ucrt-x86_64-toolchain
+      - name: Pin DuckDB-compatible Windows C++ ABI
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          # The pinned DuckDB archive uses the pre-GCC-16 emulated TLS ABI.
+          # Install compiler and matching runtime together; retain pacman signature checks.
+          pacman -U --noconfirm \
+            https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-gcc-15.2.0-14-any.pkg.tar.zst \
+            https://repo.msys2.org/mingw/ucrt64/mingw-w64-ucrt-x86_64-gcc-libs-15.2.0-14-any.pkg.tar.zst
+          test "$(g++ -dumpfullversion)" = 15.2.0
+          pacman -Q mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-gcc-libs
       - name: Install dependencies
         shell: bash
         run: |

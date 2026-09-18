@@ -44,6 +44,8 @@ Windows 同样支持这些参数，程序名为 `server.exe`。便携服务为�
 
 需要 Node/npm、Go 1.26、Rust/Cargo、C/C++ 编译器以及 Bash。各平台原生构建；Windows 使用 MSYS2 **UCRT64** 的 `mingw-w64-ucrt-x86_64-toolchain` 与 Rust GNU target。DuckDB 预编译库要求 UCRT，不能使用 MINGW64 的旧 CRT 工具链。构建机可从镜像或预热缓存取得依赖，最终安装机器无需访问任何包仓库。
 
+Windows 还需将 `gcc` 和 `gcc-libs` 一起固定为 **15.2.0-14**，安装命令见流水线 `Pin DuckDB-compatible Windows C++ ABI` 步骤。它从 MSYS2 官方仓库安装两个配套归档并保留签名验证。当前 DuckDB 静态库使用旧 TLS ABI，与 GCC 16 不兼容，见 [MSYS2 公告](https://www.msys2.org/news/#2026-05-11-native-thread-local-storage-tls-with-gcc-16)。固定后不要再次升级编译器；升级 DuckDB 时须重新验证兼容性。打包脚本会提前拒绝 GCC 16，避免编译结束才发现缺失符号。
+
 ```sh
 npm ci --prefix frontend
 npm ci --prefix desktop
