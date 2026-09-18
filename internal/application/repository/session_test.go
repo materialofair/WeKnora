@@ -345,3 +345,17 @@ func TestSessionRepositoryQueryPagedHidesMaintenanceSessions(t *testing.T) {
 			"source=%q count must not include the maintenance session", source)
 	}
 }
+func TestSessionRepositorySQLiteLiteralTitleWildcards(t *testing.T) {
+	repo, db := newSessionRepositoryForTest(t)
+	require.NoError(t, db.AutoMigrate(&testIMChannelSession{}))
+	literal := createSessionForTest(t, db, 1, "alice")
+	require.NoError(t, db.Model(literal).Update("title", `Literal 100%_\ report`).Error)
+	other := createSessionForTest(t, db, 1, "alice")
+	require.NoError(t, db.Model(other).Update("title", "Literal 100XX report").Error)
+	for _, keyword := range []string{"%", "_", `\`, "%_"} {
+		items, total, err := repo.QueryPaged(context.Background(), &types.SessionListQuery{TenantID: 1, UserID: "alice", Keyword: keyword, Page: 1, PageSize: 10})
+		require.NoError(t, err)
+		require.EqualValues(t, 1, total)
+		require.Equal(t, []string{literal.ID}, listItemIDsForTest(items))
+	}
+}

@@ -12,11 +12,14 @@
 | 持久任务 | `go test -race -tags sqlite_fts5 ./internal/router -run TestLocal`：重试、延迟、并发、取消、重启和结果写库故障恢复通过 |
 | 评估存储 | service `TestEvaluation` / `TestMemoryEvaluation`：重启、租户隔离、并发更新和错误路径通过，race 通过 |
 | 图谱 | `go test -tags sqlite_fts5 ./internal/application/repository/retriever/sqlitegraph`：持久化、文档/知识库隔离、关系检索、删除、批量查询通过 |
+| Wiki 与历史 | `go test -tags sqlite_fts5 ./internal/application/repository -run 'TestWiki\|TestSessionRepository'`：SQLite 来源关联、批量查询、正则搜索、相似标题与会话特殊字符搜索通过；正则使用 Go RE2，相似查询为流式扫描，最多保留 50 个结果 |
+| 长期记忆 | `go test -tags sqlite_fts5 ./internal/application/service/memory`：现有离线测试通过；不代表公司模型召回质量验收 |
 | 沙箱绑定 | sandbox `TestSQLiteBindings`：远程绑定保存、CAS、stale、密钥加密、租户隔离、错误路径及 race 通过 |
 | 备份 | portable tests：停机锁、文件恢复、穿越/链接拒绝、截断归档及失败清理通过 |
 | Electron | `npm test --prefix desktop`：地址验证、缺少后端、强制退出等待及即时重启通过；`node desktop/test-electron.cjs <packaged-executable>`：真实登录/设置窗口、无 Node 注入、退出关闭后端通过 |
 | 前端 | `npm ci`、`npm run build`、飞书凭据流程 6 项测试通过；更新依赖后 `npm audit` 无已知漏洞 |
 | 分发 | `node scripts/package-portable.mjs`、`npm run pack --prefix desktop -- --config.mac.identity=null` 在 macOS ARM64 成功；其余平台由 native CI 验证 |
+| Linux 原生 CI | Ubuntu 22.04 x64：原生 Go/Rust 构建、两项真实运行烟测、桌面单元测试、Electron AppImage 打包与归档上传通过（Actions run 35364530386，提交 99bb9d9a；早于后续 Wiki 兼容补丁） |
 
 ## 能力基线状态
 

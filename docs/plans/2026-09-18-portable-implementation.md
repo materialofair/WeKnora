@@ -85,3 +85,10 @@ Company credentials/network, target server OS and local strong-isolation privile
 ## 实际交付验证
 
 见 [验证记录](../portable-validation.md) 与 [部署说明](../portable.md)。以上勾选表示该开发/验证动作已执行，跨平台、OCR及企业服务未验收部分以验证记录为准，不能解释为所有环境已通过。
+
+## SQLite Wiki compatibility verification
+
+- `go test -tags sqlite_fts5 ./internal/application/repository -run 'TestWiki|TestSessionRepository'` passed after adding SQLite branches for Wiki source-reference lookups, batch summary lookups, filtered listing, regex search and similar-title lookup.
+- Source references are decoded with `json_each` and matched case-sensitively as an exact ID or `ID|` prefix; tests cover quoted/backslash/wildcard IDs, titles, KB separation, archived summaries and deleted pages.
+- SQLite Wiki `Search` uses case-insensitive Go RE2 expressions, streaming rows and retaining bounded top-k results with the same title/slug/summary/content ranking. PostgreSQL retains its existing regex SQL. PostgreSQL-only regex constructs such as backreferences are rejected by RE2. SQLite search and trigram candidate selection scan the selected KB rather than relying on PostgreSQL indexes.
+- SQLite session-title filtering now specifies `ESCAPE '\'`; `%`, `_` and backslash are verified as literal search characters.

@@ -53,6 +53,9 @@ jobs:
           node scripts/smoke-portable.cjs
           node scripts/smoke-ingestion.cjs
           npm test --prefix desktop
+      - name: Verify SQLite Wiki and history
+        if: runner.os != 'Windows'
+        run: go test -tags sqlite_fts5 ./internal/application/repository -run 'TestWiki|TestSessionRepository'
       - name: Package Electron
         shell: bash
         env:

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -757,4 +758,107 @@ func TestDeleteByKnowledgeBaseIDScopesSoftAndHardDeletes(t *testing.T) {
 	otherIssues, err := repo.ListIssues(ctx, "kb-other", "", "")
 	require.NoError(t, err)
 	require.Len(t, otherIssues, 1)
+}
+
+func TestWikiSQLiteSourceRefsExactPrefixEscapingAndBatch(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+	weird := `doc%_"\quoted`
+	rows := []struct {
+		slug, kb string
+		refs     []string
+		status   string
+	}{{"bare", "kb", []string{"doc"}, "published"}, {"titled", "kb", []string{"doc|Title with | delimiter"}, "published"}, {"longer", "kb", []string{"document|Wrong"}, "published"}, {"case", "kb", []string{"DOC|Wrong"}, "published"}, {"escaped", "kb", []string{weird + "|Title"}, "published"}, {"other", "else", []string{"doc"}, "published"}, {"archived", "kb", []string{"doc"}, "archived"}, {"in-title", "kb", []string{"other|doc|Wrong"}, "published"}}
+	for _, row := range rows {
+		p := makeWikiPage(row.kb, row.slug, types.WikiPageTypeSummary, row.status)
+		p.SourceRefs = row.refs
+		require.NoError(t, repo.Create(ctx, p))
+	}
+	pages, err := repo.ListBySourceRef(ctx, "kb", "doc")
+	require.NoError(t, err)
+	got := []string{}
+	for _, p := range pages {
+		got = append(got, p.Slug)
+	}
+	require.ElementsMatch(t, []string{"bare", "titled", "archived"}, got)
+	slugs, err := repo.ListSlugsBySourceRef(ctx, "kb", weird)
+	require.NoError(t, err)
+	require.Equal(t, []string{"escaped"}, slugs)
+	summaries, err := repo.ListSummariesByKnowledgeIDs(ctx, "kb", []string{"doc", weird, "missing", ""})
+	require.NoError(t, err)
+	require.Len(t, summaries, 2)
+	require.Contains(t, summaries[weird], "escaped")
+	require.NotContains(t, summaries["doc"], "archived")
+	require.NoError(t, repo.Delete(ctx, "kb", "escaped"))
+	slugs, err = repo.ListSlugsBySourceRef(ctx, "kb", weird)
+	require.NoError(t, err)
+	require.Empty(t, slugs)
+}
+func TestWikiSQLiteSearchAndListQuery(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+	for _, slug := range []string{"title", "Needle-slug", "summary", "content", "alias", "unrelated", "archived", "foreign", "literal"} {
+		p := makeWikiPage("kb", slug, "entity", "published")
+		p.Title = "Page"
+		p.Content = "Body"
+		p.Summary = "Abstract"
+		switch slug {
+		case "title":
+			p.Title = "NEEDLE name"
+		case "summary":
+			p.Summary = "Needle summary"
+		case "content":
+			p.Content = "needle body"
+		case "alias":
+			p.Aliases = []string{"Needle alternate"}
+		case "archived":
+			p.Title = "needle"
+			p.Status = "archived"
+		case "foreign":
+			p.Title = "needle"
+			p.KnowledgeBaseID = "other"
+		case "literal":
+			p.Title = `100%_\ rate`
+		}
+		require.NoError(t, repo.Create(ctx, p))
+	}
+	pages, err := repo.Search(ctx, "kb", "needle", 10)
+	require.NoError(t, err)
+	slugs := []string{}
+	for _, p := range pages {
+		slugs = append(slugs, p.Slug)
+	}
+	require.Equal(t, []string{"title", "Needle-slug", "summary", "content"}, slugs)
+	pages, err = repo.Search(ctx, "kb", regexp.QuoteMeta(`%_\`), 10)
+	require.NoError(t, err)
+	require.Len(t, pages, 1)
+	require.Equal(t, "literal", pages[0].Slug)
+	pages, err = repo.Search(ctx, "kb", "^NEEDLE|needle body$", 2)
+	require.NoError(t, err)
+	require.Len(t, pages, 2)
+	require.Equal(t, "title", pages[0].Slug)
+	_, err = repo.Search(ctx, "kb", "[", 10)
+	require.Error(t, err)
+
+	pages, total, err := repo.List(ctx, &types.WikiPageListRequest{KnowledgeBaseID: "kb", Query: "NEEDLE alternate", Page: 1, PageSize: 20})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Equal(t, "alias", pages[0].Slug)
+}
+func TestWikiSQLiteSimilarPages(t *testing.T) {
+	db := setupWikiPagesTestDB(t)
+	repo := NewWikiPageRepository(db)
+	ctx := context.Background()
+	for _, entry := range []struct{ slug, title, kind, status, kb string }{{"exact", "Knowledge base", "entity", "published", "kb"}, {"similar", "Knowledge bases", "concept", "published", "kb"}, {"unrelated", "Banana", "entity", "published", "kb"}, {"archived", "Knowledge base", "entity", "archived", "kb"}, {"other", "Knowledge base", "entity", "published", "other"}, {"summary", "Knowledge base", "summary", "published", "kb"}} {
+		p := makeWikiPage(entry.kb, entry.slug, entry.kind, entry.status)
+		p.Title = entry.title
+		require.NoError(t, repo.Create(ctx, p))
+	}
+	pages, err := repo.FindSimilarPages(ctx, "kb", "knowledge base", nil, 2)
+	require.NoError(t, err)
+	require.Len(t, pages, 2)
+	require.Equal(t, "exact", pages[0].Slug)
+	require.Equal(t, "similar", pages[1].Slug)
 }

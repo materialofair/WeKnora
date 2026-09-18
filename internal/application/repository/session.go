@@ -165,6 +165,9 @@ func (r *sessionRepository) QueryPaged(
 	// Dialect-aware bits so the same query works on Postgres and SQLite (Lite build).
 	isPostgres := r.db.Dialector.Name() == "postgres"
 	titleLikeExpr := "LOWER(s.title) LIKE LOWER(?)"
+	if r.db.Dialector.Name() == "sqlite" {
+		titleLikeExpr = `LOWER(s.title) LIKE LOWER(?) ESCAPE '\'`
+	}
 	if isPostgres {
 		titleLikeExpr = "s.title ILIKE ?"
 	}

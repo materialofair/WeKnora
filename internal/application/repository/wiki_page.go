@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -361,7 +364,14 @@ func (r *wikiPageRepository) List(ctx context.Context, req *types.WikiPageListRe
 	if req.Status != "" {
 		query = query.Where("status = ?", req.Status)
 	}
-	if req.Query != "" {
+	if req.Query != "" && r.wikiDialect() == "sqlite" {
+		// SQLite's portable schema has no PostgreSQL tsvector column. Match
+		// every literal search term across title, body or decoded aliases.
+		for _, term := range strings.Fields(req.Query) {
+			pattern := "%" + escapeLikePattern(term) + "%"
+			query = query.Where(`(title LIKE ? ESCAPE '\' OR content LIKE ? ESCAPE '\' OR EXISTS (SELECT 1 FROM json_each(CAST(aliases AS TEXT)) a WHERE a.type = 'text' AND a.value LIKE ? ESCAPE '\'))`, pattern, pattern, pattern)
+		}
+	} else if req.Query != "" {
 		// Use PostgreSQL full-text search + ILIKE for aliases
 		query = query.Where(
 			"(to_tsvector('simple', coalesce(title, '') || ' ' || coalesce(content, '')) @@ plainto_tsquery('simple', ?) OR aliases::text ILIKE ?)",
@@ -495,6 +505,12 @@ func (r *wikiPageRepository) ListByTypeLight(
 // ListBySourceRef retrieves all wiki pages that reference a given source knowledge ID.
 // Handles both old format ("knowledgeID") and new format ("knowledgeID|title") in source_refs JSON array.
 func (r *wikiPageRepository) ListBySourceRef(ctx context.Context, kbID string, sourceKnowledgeID string) ([]*types.WikiPage, error) {
+	if r.wikiDialect() == "sqlite" {
+		var pages []*types.WikiPage
+		err := r.db.WithContext(ctx).Where("knowledge_base_id = ?", kbID).Where(sqliteWikiSourceRefPredicate, sourceKnowledgeID, sourceKnowledgeID+"|").Find(&pages).Error
+		return pages, err
+	}
+
 	// Build the JSON needle safely so arbitrary IDs cannot break out of the
 	// quoted string (e.g. ids containing quotes or backslashes).
 	needle, err := json.Marshal([]string{sourceKnowledgeID})
@@ -541,6 +557,12 @@ func (r *wikiPageRepository) ListBySourceRef(ctx context.Context, kbID string, s
 // containment branch and idx_wiki_pages_source_refs_text for the legacy
 // text-LIKE branch — both added in migration 000041.
 func (r *wikiPageRepository) ListSlugsBySourceRef(ctx context.Context, kbID string, sourceKnowledgeID string) ([]string, error) {
+	if r.wikiDialect() == "sqlite" {
+		var slugs []string
+		err := r.db.WithContext(ctx).Model(&types.WikiPage{}).Where("knowledge_base_id = ?", kbID).Where(sqliteWikiSourceRefPredicate, sourceKnowledgeID, sourceKnowledgeID+"|").Pluck("slug", &slugs).Error
+		return slugs, err
+	}
+
 	needle, err := json.Marshal([]string{sourceKnowledgeID})
 	if err != nil {
 		return nil, fmt.Errorf("marshal source ref needle: %w", err)
@@ -855,6 +877,11 @@ func (r *wikiPageRepository) ListSummariesByKnowledgeIDs(
 		if kid == "" {
 			continue
 		}
+		if r.wikiDialect() == "sqlite" {
+			clauses = append(clauses, sqliteWikiSourceRefPredicate)
+			args = append(args, kid, kid+"|")
+			continue
+		}
 		needle, err := json.Marshal([]string{kid})
 		if err != nil {
 			return nil, fmt.Errorf("marshal kid needle: %w", err)
@@ -1064,6 +1091,9 @@ func (r *wikiPageRepository) FindSimilarPages(
 	}
 
 	q := strings.ToLower(strings.TrimSpace(query))
+	if r.wikiDialect() == "sqlite" {
+		return r.findSimilarSQLite(ctx, kbID, q, pageTypes, limit)
+	}
 
 	var rows []types.WikiPageLite
 	if err := r.db.WithContext(ctx).
@@ -1335,6 +1365,10 @@ func (r *wikiPageRepository) Search(ctx context.Context, kbID string, query stri
 		limit = 50
 	}
 
+	if r.wikiDialect() == "sqlite" {
+		return r.searchSQLite(ctx, kbID, query, limit)
+	}
+
 	// CASE expression is evaluated per-row during SELECT; we order by the
 	// alias so the DB only computes the rank once. Parameterized four
 	// times with the same regex to avoid coupling to GORM's positional
@@ -1422,4 +1456,149 @@ func (r *wikiPageRepository) UpdateIssueStatus(ctx context.Context, issueID stri
 	return r.db.WithContext(ctx).Model(&types.WikiPageIssue{}).
 		Where("id = ?", issueID).
 		Update("status", status).Error
+}
+
+// JSON elements are decoded before matching: quoted IDs, backslashes and LIKE
+// metacharacters are ordinary characters. instr is case-sensitive, as IDs are.
+const sqliteWikiSourceRefPredicate = `EXISTS (SELECT 1 FROM json_each(CAST(source_refs AS TEXT)) ref WHERE ref.type = 'text' AND (ref.value = ? OR instr(ref.value, ?) = 1))`
+
+// SQLite has no pg_trgm extension. Stream only titles/slugs, retaining a bounded
+// top-k set, then fetch the lightweight projections of selected pages.
+func (r *wikiPageRepository) findSimilarSQLite(ctx context.Context, kbID, query string, pageTypes []string, limit int) ([]*types.WikiPageLite, error) {
+	rows, err := r.db.WithContext(ctx).Model(&types.WikiPage{}).Select("slug,title").Where("knowledge_base_id = ? AND page_type IN ? AND status <> ?", kbID, pageTypes, types.WikiPageStatusArchived).Rows()
+	if err != nil {
+		return nil, err
+	}
+	type candidate struct {
+		slug  string
+		score float64
+	}
+	best := make([]candidate, 0, limit+1)
+	queryGrams := wikiTitleTrigrams(query)
+	for rows.Next() {
+		var slug, title string
+		if err = rows.Scan(&slug, &title); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		grams := wikiTitleTrigrams(title)
+		intersection := 0
+		for gram := range grams {
+			if _, ok := queryGrams[gram]; ok {
+				intersection++
+			}
+		}
+		union := len(grams) + len(queryGrams) - intersection
+		if union == 0 {
+			continue
+		}
+		score := float64(intersection) / float64(union)
+		if score < 0.1 {
+			continue
+		}
+		best = append(best, candidate{slug, score})
+		sort.Slice(best, func(i, j int) bool {
+			if best[i].score == best[j].score {
+				return best[i].slug < best[j].slug
+			}
+			return best[i].score > best[j].score
+		})
+		if len(best) > limit {
+			best = best[:limit]
+		}
+	}
+	scanErr := rows.Err()
+	closeErr := rows.Close()
+	if scanErr != nil {
+		return nil, scanErr
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
+	slugs := make([]string, len(best))
+	for i, c := range best {
+		slugs[i] = c.slug
+	}
+	matches, err := r.ListBySlugs(ctx, kbID, slugs)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*types.WikiPageLite, 0, len(best))
+	for _, c := range best {
+		if page := matches[c.slug]; page != nil {
+			result = append(result, page)
+		}
+	}
+	return result, nil
+}
+func wikiTitleTrigrams(title string) map[string]struct{} {
+	grams := map[string]struct{}{}
+	for _, word := range strings.FieldsFunc(strings.ToLower(title), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsNumber(r) }) {
+		chars := []rune("  " + word + " ")
+		for i := 0; i+3 <= len(chars); i++ {
+			grams[string(chars[i:i+3])] = struct{}{}
+		}
+	}
+	return grams
+}
+
+// SQLite uses Go's RE2 syntax for case-insensitive regex search. The PostgreSQL
+// branch retains POSIX regex syntax; backend-specific features (e.g. PG
+// backreferences) are not accepted by RE2. Keep only top-k matching pages.
+func (r *wikiPageRepository) searchSQLite(ctx context.Context, kbID, query string, limit int) ([]*types.WikiPage, error) {
+	expression, err := regexp.Compile("(?i)" + query)
+	if err != nil {
+		return nil, fmt.Errorf("invalid wiki search regular expression: %w", err)
+	}
+	rows, err := r.db.WithContext(ctx).Model(&types.WikiPage{}).Where("knowledge_base_id = ? AND status <> ?", kbID, types.WikiPageStatusArchived).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	type hit struct {
+		page *types.WikiPage
+		rank int
+	}
+	best := make([]hit, 0, limit+1)
+	for rows.Next() {
+		var page types.WikiPage
+		if err = r.db.ScanRows(rows, &page); err != nil {
+			return nil, err
+		}
+		rank := 0
+		switch {
+		case expression.MatchString(page.Title):
+			rank = 4
+		case expression.MatchString(page.Slug):
+			rank = 3
+		case expression.MatchString(page.Summary):
+			rank = 2
+		case expression.MatchString(page.Content):
+			rank = 1
+		}
+		if rank == 0 {
+			continue
+		}
+		best = append(best, hit{&page, rank})
+		sort.Slice(best, func(i, j int) bool {
+			if best[i].rank != best[j].rank {
+				return best[i].rank > best[j].rank
+			}
+			if !best[i].page.UpdatedAt.Equal(best[j].page.UpdatedAt) {
+				return best[i].page.UpdatedAt.After(best[j].page.UpdatedAt)
+			}
+			return best[i].page.ID < best[j].page.ID
+		})
+		if len(best) > limit {
+			best = best[:limit]
+		}
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	pages := make([]*types.WikiPage, 0, len(best))
+	for _, match := range best {
+		pages = append(pages, match.page)
+	}
+	return pages, nil
 }
