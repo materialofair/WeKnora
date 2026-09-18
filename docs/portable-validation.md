@@ -1,6 +1,6 @@
 # 便携改造验证记录
 
-日期：2026-09-18。验证主机：macOS ARM64。以下区分新实现的实测结果与复用功能；不把本地 mock 当作公司模型联调结果。
+日期：2026-09-18–19。验证主机：macOS ARM64，另有 GitHub 原生 CI。以下区分新实现的实测结果与复用功能；不把本地 mock 当作公司模型联调结果。
 
 ## 已验证
 
@@ -19,7 +19,19 @@
 | Electron | `npm test --prefix desktop`：地址验证、缺少后端、强制退出等待及即时重启通过；`node desktop/test-electron.cjs <packaged-executable>`：真实登录/设置窗口、无 Node 注入、退出关闭后端通过 |
 | 前端 | `npm ci`、`npm run build`、飞书凭据流程 6 项测试通过；更新依赖后 `npm audit` 无已知漏洞 |
 | 分发 | `node scripts/package-portable.mjs`、`npm run pack --prefix desktop -- --config.mac.identity=null` 在 macOS ARM64 成功；其余平台由 native CI 验证 |
-| Linux 原生 CI | Ubuntu 22.04 x64：原生 Go/Rust 构建、两项真实运行烟测、桌面单元测试、Electron AppImage 打包与归档上传通过（Actions run 35364530386，提交 99bb9d9a；早于后续 Wiki 兼容补丁） |
+| Linux 原生 CI | Ubuntu 22.04 x64：原生 Go/Rust 构建、两项真实运行烟测、Wiki/历史测试、桌面单元测试、Electron AppImage 打包与归档上传通过（[Actions run 35368679529](https://github.com/materialofair/WeKnora/actions/runs/35368679529)，提交 adf02d87） |
+| macOS 原生 CI | macOS 14 ARM64：同一提交的原生构建、两项运行烟测、Wiki/历史测试、桌面单元测试、DMG/ZIP 打包及上传通过；真实 Electron 窗口另在本机验证 |
+| Windows 原生 CI | Windows Server 2022 x64：同一提交的原生构建、运行库依赖检查、两项运行烟测、桌面单元测试、Electron NSIS/便携 EXE 打包、服务 ZIP 归档及上传通过；Unix 专用强制退出测试跳过。Wiki/历史专项 SQL 测试在 Mac/Linux 执行 |
+
+## 下载本轮构建产物
+
+提交 `adf02d87` 的 [三平台流水线](https://github.com/materialofair/WeKnora/actions/runs/35368679529) 全部成功。登录 GitHub 后可下载：
+
+- [Windows x64：安装 EXE、便携 EXE、服务 ZIP](https://github.com/materialofair/WeKnora/actions/runs/35368679529/artifacts/10558486747)
+- [macOS ARM64：DMG、应用 ZIP、服务归档](https://github.com/materialofair/WeKnora/actions/runs/35368679529/artifacts/10558045654)
+- [Linux x64：AppImage 归档、服务归档](https://github.com/materialofair/WeKnora/actions/runs/35368679529/artifacts/10558105016)
+
+安装与配置参见 [部署说明](portable.md)。制品是本轮测试构建，没有配置发行签名；公司终端验收仍是独立步骤。
 
 ## 能力基线状态
 
@@ -32,7 +44,7 @@
 | CAP-13 GraphRAG | 新增 SQLite 关系存储、检索与删除 | 大型图谱性能和抽取质量 |
 | CAP-14 飞书 | 保留 Wiki/Drive 与 IM；移除指定七类数据源 | 私有飞书实际认证、增量同步、回调 |
 | CAP-15–16 模型/权限 | 保留标准版与租户权限，不用 Lite 绕过登录 | 公司身份系统、模型厂商特有协议 |
-| CAP-17 可靠运行 | 持久任务、密钥、备份、恢复、迁移失败中止、桌面生命周期 | Windows/Linux 实机、升级样本；任务至少一次执行，外部副作用仍须幂等 |
+| CAP-17 可靠运行 | 持久任务、密钥、备份、恢复、迁移失败中止、桌面生命周期 | 公司云桌面与目标服务器、升级样本；任务至少一次执行，外部副作用仍须幂等 |
 | CAP-18 评估 | 结果持久化，重启中断明确标失败 | 真实基准集与质量门槛 |
 | CAP-19 其他入口 | 保留未明确排除的 Web/API/IM/存储扩展；移除小程序 | 各外部服务单独联调 |
 
@@ -40,4 +52,4 @@
 
 全量 sandbox 测试中的 `TestPolicyAllowsPublicHostname` 在本机失败：DNS 代理将 `api.e2b.dev` 解析为 `198.18.0.18`，被既有地址保护拒绝。其余 sandbox 测试以 `-skip TestPolicyAllowsPublicHostname` 通过。没有修改安全策略来放行该地址。
 
-未获得公司模型/飞书/远程沙箱、Windows 云桌面和服务器环境；相关项不声明完成验收。当前 macOS 制品未签名；Windows GNU 链接和最终 exe、Linux 系统库兼容性需 native CI 与实机结果。Go portable 工具包跨平台编译并不等于完整 Electron 程序已验证。
+未获得公司模型/飞书/远程沙箱、Windows 云桌面和目标服务器环境；相关项不声明完成验收。三平台的原生后端运行烟测已通过；Electron 图形界面仅在本机 macOS 实测，Windows 安装和 Linux 桌面仍须目标环境验收。制品未配置发行签名，企业策略与其他 Linux 发行版的系统库兼容性仍需实机确认。原生 CI 通过不等于所有公司环境已通过。
