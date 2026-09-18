@@ -42,7 +42,7 @@ Windows 同样支持这些参数，程序名为 `server.exe`。便携服务为�
 
 ## 制作安装包（开发机器）
 
-需要 Node/npm、Go 1.26、Rust/Cargo、C/C++ 编译器以及 Bash。各平台原生构建；Windows 使用 MinGW-w64 与 Rust GNU target。构建机可从镜像或预热缓存取得依赖，最终安装机器无需访问任何包仓库。
+需要 Node/npm、Go 1.26、Rust/Cargo、C/C++ 编译器以及 Bash。各平台原生构建；Windows 使用 MSYS2 **UCRT64** 的 `mingw-w64-ucrt-x86_64-toolchain` 与 Rust GNU target。DuckDB 预编译库要求 UCRT，不能使用 MINGW64 的旧 CRT 工具链。构建机可从镜像或预热缓存取得依赖，最终安装机器无需访问任何包仓库。
 
 ```sh
 npm ci --prefix frontend
