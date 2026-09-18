@@ -58,13 +58,28 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: npm run dist --prefix desktop
+      - name: Archive Unix executables with permissions
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          bundle=$(node -p 'process.platform + "-" + process.arch')
+          tar -czf "dist/knowledge-assistant-${RUNNER_OS}.tar.gz" -C dist/portable "$bundle"
+          for executable in dist/electron/*.AppImage; do
+            [ -f "$executable" ] || continue
+            tar -czf "$executable.tar.gz" -C dist/electron "$(basename "$executable")"
+          done
+      - name: Archive Windows portable service
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path dist/portable/win32-x64 -DestinationPath dist/knowledge-assistant-Windows.zip
       - uses: actions/upload-artifact@v4
         with:
           name: knowledge-assistant-${{ matrix.os }}
           path: |
-            dist/portable/
+            dist/knowledge-assistant-*.tar.gz
+            dist/knowledge-assistant-*.zip
             dist/electron/*.dmg
             dist/electron/*.zip
             dist/electron/*.exe
-            dist/electron/*.AppImage
+            dist/electron/*.AppImage.tar.gz
           if-no-files-found: error

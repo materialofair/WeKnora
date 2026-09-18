@@ -75,7 +75,7 @@ prepare_patched_anydoc() {
     local unpack="$crate_dir/.anydoc-unpack"
     rm -rf "$unpack"
     mkdir -p "$unpack"
-    tar -xzf "$tarball" -C "$unpack"
+    tar -xzf - -C "$unpack" < "$tarball"
     src=$(find "$unpack" -maxdepth 1 -type d -name "anydoc-$anydoc_version" | head -1)
     if [ -z "$src" ]; then
       echo "error: unpacked anydoc-$anydoc_version crate is missing" >&2

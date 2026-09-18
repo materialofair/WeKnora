@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 // Build on each target OS; end users only run the generated executables.
 import { spawnSync } from 'node:child_process';
-import { cpSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { cpSync, mkdirSync, writeFileSync, existsSync, mkdtempSync, renameSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const output = join(root, 'dist', 'portable', `${process.platform}-${process.arch}`);
+const destination = join(root, 'dist', 'portable', `${process.platform}-${process.arch}`);
+if (existsSync(join(destination, 'data'))) throw new Error(`Existing runtime data in ${destination}/data; move it to a separate data directory before packaging.`);
+mkdirSync(join(root, 'dist'), { recursive: true });
+const output = mkdtempSync(join(root, 'dist', `.portable-${process.platform}-${process.arch}-`));
 const exe = process.platform === 'win32' ? '.exe' : '';
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { cwd: root, stdio: 'inherit', ...options });
@@ -19,7 +22,8 @@ function capture(command, args) {
 }
 mkdirSync(output, { recursive: true });
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-run(npm, ['run', 'build'], { cwd: join(root, 'frontend'), shell: process.platform === 'win32' });
+run(npm, ['run', 'build'], { cwd: join(root, 'frontend'), shell: process.platform === 'win32',
+  env: { ...process.env, NODE_OPTIONS: process.env.NODE_OPTIONS || '--max-old-space-size=4096' } });
 run('bash', ['scripts/build-anydoc-lib.sh']);
 const env = { ...process.env, CGO_ENABLED: '1' };
 // A cloud desktop must not need MinGW DLLs installed alongside the app.
@@ -48,4 +52,8 @@ writeFileSync(join(output, 'start.cmd'), '@echo off\r\nif not defined WEKNORA_DA
 for (const required of [`server${exe}`, `assistant-backup${exe}`, 'config/config.yaml', 'web/index.html', 'migrations/sqlite', 'jieba/jieba.dict.utf8']) {
   if (!existsSync(join(output, required))) throw new Error(`Missing artifact: ${required}`);
 }
-console.log(`Portable bundle ready: ${output}`);
+// Build in a fresh staging directory: old runtime files must never enter a release.
+mkdirSync(dirname(destination), { recursive: true });
+if (existsSync(destination)) renameSync(destination, `${destination}.previous-${Date.now()}`);
+renameSync(output, destination);
+console.log(`Portable bundle ready: ${destination}`);
